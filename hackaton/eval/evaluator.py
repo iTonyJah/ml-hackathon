@@ -66,7 +66,9 @@ def _to_uuid_string(raw: str) -> str:
         return str(uuid5(NAMESPACE_DNS, text))
 
 
-def _load_csvs(cfg: EvalConfig) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def _load_csvs(
+    cfg: EvalConfig,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     users = pd.read_csv(cfg.user_path)
     train_shifts = pd.read_csv(cfg.shift_path)
     train_events = pd.read_csv(cfg.event_path)
@@ -280,7 +282,9 @@ def run_evaluation(cfg: EvalConfig) -> dict[str, object]:
         events_uploaded = _upload_events(client, train_events, cfg.batch_size)
 
         LOGGER.info("Stage 4/9: Running initial prepare (<= %ss)", cfg.prepare_initial_timeout_sec)
-        prepare_initial_sec = _run_prepare_and_wait(client, cfg.prepare_initial_timeout_sec, cfg.poll_interval_sec)
+        prepare_initial_sec = _run_prepare_and_wait(
+            client, cfg.prepare_initial_timeout_sec, cfg.poll_interval_sec
+        )
         prepare_durations_sec.append(prepare_initial_sec)
 
         eval_days = sorted(d for d in val_apply["date"].dropna().unique())
@@ -289,7 +293,9 @@ def run_evaluation(cfg: EvalConfig) -> dict[str, object]:
         for day_idx, day in enumerate(eval_days, start=1):
             if not isinstance(day, date):
                 continue
-            LOGGER.info("Day %s/%s: %s | building day slices", day_idx, len(eval_days), day.isoformat())
+            LOGGER.info(
+                "Day %s/%s: %s | building day slices", day_idx, len(eval_days), day.isoformat()
+            )
             day_shifts = val_shifts[val_shifts["start_at"].dt.date == day].copy()
             day_apply = val_apply[val_apply["date"] == day].copy()
             if day_shifts.empty:
@@ -297,7 +303,11 @@ def run_evaluation(cfg: EvalConfig) -> dict[str, object]:
                 continue
 
             LOGGER.info("Day %s: waiting service ready before prediction", day.isoformat())
-            _wait_until_ready_only(client, timeout_sec=cfg.prepare_day_timeout_sec, poll_interval_sec=cfg.poll_interval_sec)
+            _wait_until_ready_only(
+                client,
+                timeout_sec=cfg.prepare_day_timeout_sec,
+                poll_interval_sec=cfg.poll_interval_sec,
+            )
             LOGGER.info("Day %s: predicting candidates", day.isoformat())
             predict_started = time.perf_counter()
             prediction_frame, latencies_ms = _build_day_prediction_frame(
@@ -313,13 +323,28 @@ def run_evaluation(cfg: EvalConfig) -> dict[str, object]:
 
             day_events = val_events[val_events["ts"].dt.date == day].copy()
             LOGGER.info("Day %s: waiting service ready before post-day uploads", day.isoformat())
-            _wait_until_ready_only(client, timeout_sec=cfg.prepare_day_timeout_sec, poll_interval_sec=cfg.poll_interval_sec)
-            LOGGER.info("Day %s: post-day upload shifts=%s events=%s", day.isoformat(), len(day_shifts), len(day_events))
+            _wait_until_ready_only(
+                client,
+                timeout_sec=cfg.prepare_day_timeout_sec,
+                poll_interval_sec=cfg.poll_interval_sec,
+            )
+            LOGGER.info(
+                "Day %s: post-day upload shifts=%s events=%s",
+                day.isoformat(),
+                len(day_shifts),
+                len(day_events),
+            )
             day_shifts_uploaded = _upload_shifts(client, day_shifts, cfg.batch_size)
-            day_events_uploaded = _upload_events(client, day_events, cfg.batch_size) if not day_events.empty else 0
+            day_events_uploaded = (
+                _upload_events(client, day_events, cfg.batch_size) if not day_events.empty else 0
+            )
 
-            LOGGER.info("Day %s: incremental prepare (<= %ss)", day.isoformat(), cfg.prepare_day_timeout_sec)
-            prepare_day_sec = _run_prepare_and_wait(client, cfg.prepare_day_timeout_sec, cfg.poll_interval_sec)
+            LOGGER.info(
+                "Day %s: incremental prepare (<= %ss)", day.isoformat(), cfg.prepare_day_timeout_sec
+            )
+            prepare_day_sec = _run_prepare_and_wait(
+                client, cfg.prepare_day_timeout_sec, cfg.poll_interval_sec
+            )
             prepare_durations_sec.append(prepare_day_sec)
 
             day_reports.append(
@@ -342,9 +367,15 @@ def run_evaluation(cfg: EvalConfig) -> dict[str, object]:
             )
 
         LOGGER.info("Stage 6/9: Aggregating final metric")
-        overall_metric = float(np.mean([d["target_metric"] for d in day_reports])) if day_reports else 0.0
+        overall_metric = (
+            float(np.mean([d["target_metric"] for d in day_reports])) if day_reports else 0.0
+        )
         total_predict_calls = int(sum(d["predict_calls"] for d in day_reports))
-        rpm = (total_predict_calls / total_predict_wall_seconds * 60.0) if total_predict_wall_seconds > 0 else 0.0
+        rpm = (
+            (total_predict_calls / total_predict_wall_seconds * 60.0)
+            if total_predict_wall_seconds > 0
+            else 0.0
+        )
 
         summary = {
             "overall_target_metric": overall_metric,
@@ -360,7 +391,9 @@ def run_evaluation(cfg: EvalConfig) -> dict[str, object]:
                 "predict_latency_p95_ms": _percentile(all_predict_latencies_ms, 95),
                 "predict_rpm": rpm,
                 "prepare_durations_sec": prepare_durations_sec,
-                "prepare_duration_avg_sec": float(np.mean(prepare_durations_sec)) if prepare_durations_sec else 0.0,
+                "prepare_duration_avg_sec": float(np.mean(prepare_durations_sec))
+                if prepare_durations_sec
+                else 0.0,
             },
             "day_reports": day_reports,
             "stop_reason": stop_reason or "completed",
@@ -368,7 +401,9 @@ def run_evaluation(cfg: EvalConfig) -> dict[str, object]:
         }
 
         LOGGER.info("Stage 7/9: Writing evaluation report artifacts")
-        _write_markdown_report(output_dir / "eval_report.md", summary, users, train_shifts, train_events)
+        _write_markdown_report(
+            output_dir / "eval_report.md", summary, users, train_shifts, train_events
+        )
         LOGGER.info("Stage 8/9: Evaluation artifacts saved")
         return summary
     except Exception as exc:  # noqa: BLE001
@@ -444,4 +479,3 @@ def _write_markdown_report(
             lines.append("- no group metrics")
         lines.append("")
     report_path.write_text("\n".join(lines), encoding="utf-8")
-

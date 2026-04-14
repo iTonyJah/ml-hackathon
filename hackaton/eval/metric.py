@@ -59,13 +59,17 @@ def calculate_target_metric(frame: pd.DataFrame) -> MetricResult:
         )
 
     data["eval_date"] = data["start_at"].dt.date.astype(str)
-    data["capacity"] = pd.to_numeric(data["capacity"], errors="coerce").fillna(1).astype(int).clip(lower=1)
+    data["capacity"] = (
+        pd.to_numeric(data["capacity"], errors="coerce").fillna(1).astype(int).clip(lower=1)
+    )
     data["target"] = pd.to_numeric(data["target"], errors="coerce").fillna(0).astype(int)
     data["score"] = pd.to_numeric(data["score"], errors="coerce")
     data = data.dropna(subset=["score"])
 
     shift_metrics_rows: list[dict[str, object]] = []
-    for (eval_date, capacity, shift_id), shift_df in data.groupby(["eval_date", "capacity", "shift_id"]):
+    for (eval_date, capacity, shift_id), shift_df in data.groupby(
+        ["eval_date", "capacity", "shift_id"]
+    ):
         metric = _shift_metric_for_top_capacity(shift_df)
         if metric is None:
             continue
@@ -111,4 +115,3 @@ def calculate_target_metric(frame: pd.DataFrame) -> MetricResult:
             for _, row in group_metrics.iterrows()
         ],
     )
-

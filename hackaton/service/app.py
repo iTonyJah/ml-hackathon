@@ -95,7 +95,7 @@ class HackatonRpcService:
             except ValidationError as exc:
                 return {"user_ids": [], "status_code": 422, "detail": str(exc)}
 
-            """ 
+            """
                 EXTENSION POINT
                 Ваше решение должно быть здесь.
             """

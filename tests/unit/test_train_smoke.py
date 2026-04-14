@@ -65,13 +65,55 @@ def _write_train_csvs(base: Path) -> tuple[Path, Path, Path]:
     )
     events = pd.DataFrame(
         [
-            {"id": "ev1", "shift_id": "s1", "user_id": "u1", "interaction": "VIEW", "ts": "2026-01-08T10:00:00Z"},
-            {"id": "ev2", "shift_id": "s1", "user_id": "u1", "interaction": "APPLY", "ts": "2026-01-09T10:00:00Z"},
-            {"id": "ev3", "shift_id": "s2", "user_id": "u2", "interaction": "VIEW", "ts": "2026-01-19T10:00:00Z"},
-            {"id": "ev4", "shift_id": "s2", "user_id": "u3", "interaction": "VIEW", "ts": "2026-01-18T10:00:00Z"},
-            {"id": "ev5", "shift_id": "s3", "user_id": "u1", "interaction": "VIEW", "ts": "2026-02-03T10:00:00Z"},
-            {"id": "ev6", "shift_id": "s3", "user_id": "u1", "interaction": "FINISHED", "ts": "2026-02-04T10:00:00Z"},
-            {"id": "ev7", "shift_id": "s3", "user_id": "u2", "interaction": "VIEW", "ts": "2026-02-01T10:00:00Z"},
+            {
+                "id": "ev1",
+                "shift_id": "s1",
+                "user_id": "u1",
+                "interaction": "VIEW",
+                "ts": "2026-01-08T10:00:00Z",
+            },
+            {
+                "id": "ev2",
+                "shift_id": "s1",
+                "user_id": "u1",
+                "interaction": "APPLY",
+                "ts": "2026-01-09T10:00:00Z",
+            },
+            {
+                "id": "ev3",
+                "shift_id": "s2",
+                "user_id": "u2",
+                "interaction": "VIEW",
+                "ts": "2026-01-19T10:00:00Z",
+            },
+            {
+                "id": "ev4",
+                "shift_id": "s2",
+                "user_id": "u3",
+                "interaction": "VIEW",
+                "ts": "2026-01-18T10:00:00Z",
+            },
+            {
+                "id": "ev5",
+                "shift_id": "s3",
+                "user_id": "u1",
+                "interaction": "VIEW",
+                "ts": "2026-02-03T10:00:00Z",
+            },
+            {
+                "id": "ev6",
+                "shift_id": "s3",
+                "user_id": "u1",
+                "interaction": "FINISHED",
+                "ts": "2026-02-04T10:00:00Z",
+            },
+            {
+                "id": "ev7",
+                "shift_id": "s3",
+                "user_id": "u2",
+                "interaction": "VIEW",
+                "ts": "2026-02-01T10:00:00Z",
+            },
         ]
     )
 
@@ -112,4 +154,3 @@ def test_train_cli_smoke(tmp_path: Path) -> None:
         out_dir / "train_report.md",
     ]:
         assert path.exists(), f"Missing artifact: {path}"
-

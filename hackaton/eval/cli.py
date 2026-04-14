@@ -16,12 +16,24 @@ def cli() -> None:
 @cli.command("run")
 @click.option("--host", type=str, default="127.0.0.1", show_default=True)
 @click.option("--port", type=int, default=8000, show_default=True)
-@click.option("--user-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True)
-@click.option("--shift-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True)
-@click.option("--event-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True)
-@click.option("--val-apply-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True)
-@click.option("--val-shift-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True)
-@click.option("--val-event-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True)
+@click.option(
+    "--user-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True
+)
+@click.option(
+    "--shift-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True
+)
+@click.option(
+    "--event-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True
+)
+@click.option(
+    "--val-apply-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True
+)
+@click.option(
+    "--val-shift-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True
+)
+@click.option(
+    "--val-event-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True
+)
 @click.option("--output-dir", type=click.Path(path_type=Path, file_okay=False), required=True)
 @click.option("--limit", type=int, default=10, show_default=True)
 @click.option("--batch-size", type=int, default=1000, show_default=True)
@@ -89,4 +101,3 @@ def run_cmd(
 
 if __name__ == "__main__":
     cli()
-

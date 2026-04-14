@@ -12,10 +12,7 @@ class Repository:
         self.db_path = db_path
 
     async def upsert_users(self, users: Iterable[UserDTO]) -> int:
-        payload = [
-            (u.id, u.location_id, int(u.is_strict_location), int(u.has_mk))
-            for u in users
-        ]
+        payload = [(u.id, u.location_id, int(u.is_strict_location), int(u.has_mk)) for u in users]
         if not payload:
             return 0
         query = """

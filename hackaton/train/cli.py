@@ -15,9 +15,15 @@ def cli() -> None:
 
 
 @cli.command("train")
-@click.option("--user-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True)
-@click.option("--shift-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True)
-@click.option("--event-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True)
+@click.option(
+    "--user-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True
+)
+@click.option(
+    "--shift-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True
+)
+@click.option(
+    "--event-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True
+)
 @click.option("--output-dir", type=click.Path(path_type=Path, file_okay=False), required=True)
 @click.option("--random-state", type=int, default=42, show_default=True)
 @click.option("--max-iter", type=int, default=1000, show_default=True)
@@ -58,4 +64,3 @@ def train_cmd(
 
 if __name__ == "__main__":
     cli()
-
