@@ -6,7 +6,6 @@
     poetry run python create_validation_split.py
 """
 
-import os
 from pathlib import Path
 
 import pandas as pd
@@ -27,8 +26,8 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     shifts["start_at"] = pd.to_datetime(shifts["start_at"], utc=True)
     events["ts"] = pd.to_datetime(events["ts"], utc=True)
 
-    print(f"  Shifts:  {len(shifts):>7,} | {shifts['start_at'].min().date()} → {shifts['start_at'].max().date()}")
-    print(f"  Events:  {len(events):>7,} | {events['ts'].min().date()} → {events['ts'].max().date()}")
+    print(f"  Shifts:  {len(shifts):>7,} | {shifts['start_at'].min().date()} -> {shifts['start_at'].max().date()}")
+    print(f"  Events:  {len(events):>7,} | {events['ts'].min().date()} -> {events['ts'].max().date()}")
     print(f"  Users:   {len(users):>7,}")
     print(f"  Event types: {events['interaction'].value_counts().to_dict()}")
     return shifts, events, users
@@ -81,10 +80,16 @@ def build_apply(events: pd.DataFrame, val_shifts: pd.DataFrame) -> pd.DataFrame:
         .copy()
     )
 
-    print(f"\apply.csv:")
+    # Evaluator ожидает колонку 'date', не 'ts'
+    apply["date"] = apply["ts"].dt.date
+    apply = apply[["user_id", "shift_id", "date"]]
+
+    print(f"apply.csv:")
     print(f"  Записей APPLY (val, без SYSTEM_CANCEL): {len(apply):,}")
     print(f"  Уникальных пользователей: {apply['user_id'].nunique():,}")
     print(f"  Уникальных смен:          {apply['shift_id'].nunique():,}")
+    print(f"  Колонки: {apply.columns.tolist()}")
+    print(f"  Пример:{apply.head(3).to_string(index=False)}")
     return apply
 
 
