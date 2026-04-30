@@ -6,8 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import aiosqlite
 import pandas as pd
@@ -15,9 +14,6 @@ import pandas as pd
 from hackaton.service.ml_model import MLModel
 
 LOGGER = logging.getLogger(__name__)
-
-# Сколько активных пользователей кэшировать на локацию
-CACHE_TOP_N = 200
 
 
 @dataclass
@@ -34,13 +30,9 @@ class PrepareManager:
         self._sleep_seconds = sleep_seconds
         self.model = MLModel()
 
-        # Кэш: location_id -> список user_id отсортированных по активности
-        self._location_cache: dict[str, list[str]] = {}
-        # Кэш: location_id + mk -> список user_id (с мед книжкой)
-        self._location_mk_cache: dict[str, list[str]] = {}
         # Кэш данных пользователей: user_id -> dict
         self._users_cache: dict[str, dict] = {}
-        # Глобальный топ активных (fallback)
+        # Все пользователи отсортированные по активности (для predict)
         self._global_top: list[str] = []
 
     @property
@@ -76,23 +68,20 @@ class PrepareManager:
         return users, shifts, events
 
     def _build_cache(self, users: pd.DataFrame, events: pd.DataFrame) -> None:
-        """Строим кэш активных пользователей по локациям"""
-        LOGGER.info("Building location cache...")
+        """Строим кэш пользователей по локациям (без ограничения TOP-N)."""
+        LOGGER.info("Building user cache...")
 
-        # Считаем активность каждого пользователя
         if not events.empty:
             activity = events.groupby("user_id").size().reset_index(name="n_events")
         else:
             activity = pd.DataFrame(columns=["user_id", "n_events"])
 
-        # Присоединяем к пользователям
         users_with_activity = users.merge(
             activity, left_on="id", right_on="user_id", how="left"
         )
         users_with_activity["n_events"] = users_with_activity["n_events"].fillna(0).astype(int)
         users_with_activity = users_with_activity.sort_values("n_events", ascending=False)
 
-        # Кэш данных пользователей
         self._users_cache = {
             str(row["id"]): {
                 "id": str(row["id"]),
@@ -103,39 +92,38 @@ class PrepareManager:
             for _, row in users_with_activity.iterrows()
         }
 
-        # Кэш по локациям
+        # Кэш по локациям: ALL users (без ограничения — чтобы не пропустить аппликантов)
+        from collections import defaultdict
         location_cache: dict[str, list[str]] = defaultdict(list)
-        location_mk_cache: dict[str, list[str]] = defaultdict(list)
-
         for _, row in users_with_activity.iterrows():
-            loc = str(row["location_id"])
-            uid = str(row["id"])
-            location_cache[loc].append(uid)
-            if bool(row["has_mk"]):
-                location_mk_cache[loc].append(uid)
+            location_cache[str(row["location_id"])].append(str(row["id"]))
 
-        # Обрезаем до CACHE_TOP_N
-        self._location_cache = {k: v[:CACHE_TOP_N] for k, v in location_cache.items()}
-        self._location_mk_cache = {k: v[:CACHE_TOP_N] for k, v in location_mk_cache.items()}
+        self._location_cache: dict[str, list[str]] = dict(location_cache)
 
-        # Глобальный топ (fallback)
-        self._global_top = users_with_activity["id"].astype(str).tolist()[:CACHE_TOP_N]
+        # Глобальный топ — для cross-location кандидатов (fallback)
+        self._global_top = users_with_activity["id"].astype(str).tolist()
 
         LOGGER.info("Cache built: %d locations, %d users total",
                     len(self._location_cache), len(self._users_cache))
 
     def get_candidates(self, location_id: str, need_mk: bool, limit: int) -> list[str]:
-        """Быстрое получение кандидатов из кэша — O(1)"""
-        if need_mk:
-            candidates = self._location_mk_cache.get(str(location_id), [])
-        else:
-            candidates = self._location_cache.get(str(location_id), [])
+        """Возвращает кандидатов для предсказания.
 
-        if len(candidates) < limit:
-            # Добираем из глобального топа
-            existing = set(candidates)
-            extra = [u for u in self._global_top if u not in existing]
-            candidates = candidates + extra
+        Для больших локаций (≥50 пользователей) — только пользователи в локации.
+        Это критически важно: кросс-локационные пользователи из global_top вытесняют
+        реальных кандидатов с более высоким location_match-скором.
+        Для маленьких локаций (<50) добавляем global fallback чтобы набрать пул.
+        """
+        loc_candidates = self._location_cache.get(str(location_id), [])
+
+        if len(loc_candidates) < 50:
+            # Маленькая локация — добавляем глобальный топ как fallback
+            existing = set(loc_candidates)
+            extra = [u for u in self._global_top if u not in existing][:500]
+            candidates = loc_candidates + extra
+        else:
+            # Большая локация — только свои пользователи (без global шума)
+            candidates = loc_candidates
 
         return candidates[:limit]
 
@@ -160,9 +148,13 @@ class PrepareManager:
             # Обучаем модель в executor чтобы не блокировать event loop
             if not events.empty and not shifts.empty:
                 loop = asyncio.get_event_loop()
-                await loop.run_in_executor(
-                    None, self.model.train, events, shifts, users
-                )
+
+                def _train_and_cache() -> None:
+                    self.model.train(events, shifts, users)
+                    # После обучения строим векторизованный кэш для быстрого inference
+                    self.model.build_inference_cache(users)
+
+                await loop.run_in_executor(None, _train_and_cache)
             else:
                 LOGGER.warning("Not enough data to train model")
 

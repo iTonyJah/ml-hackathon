@@ -15,7 +15,7 @@ def _build_service(tmp_path: Path, prepare_sleep_seconds: float = 0.0) -> Hackat
     db_path = str(tmp_path / "e2e.db")
     asyncio.run(init_db_for(db_path))
     repository = Repository(db_path=db_path)
-    prepare = PrepareManager(sleep_seconds=prepare_sleep_seconds)
+    prepare = PrepareManager(db_path=db_path, sleep_seconds=prepare_sleep_seconds)
     return HackatonRpcService(repository=repository, prepare=prepare)
 
 

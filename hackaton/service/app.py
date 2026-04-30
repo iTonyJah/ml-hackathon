@@ -98,11 +98,11 @@ class HackatonRpcService:
             shift = request.shift
             pm = self.prepare_manager
 
-            # Шаг 1: быстро получаем кандидатов из кэша — O(1), без SQL
+            # Шаг 1: получаем кандидатов из локации + глобальный fallback (без TOP-200 ограничения)
             candidates = pm.get_candidates(
                 location_id=shift.location_id,
                 need_mk=shift.need_mk,
-                limit=200,  # берём топ-200 активных для скоринга моделью
+                limit=5000,  # все пользователи в локации + 500 кросс-локационных
             )
 
             if not candidates:
@@ -112,6 +112,7 @@ class HackatonRpcService:
             model = pm.model
             if model.is_trained:
                 shift_dict = {
+                    "id": shift.id,
                     "start_at": shift.start_at.isoformat(),
                     "location_id": shift.location_id,
                     "task_type": shift.task_type,
