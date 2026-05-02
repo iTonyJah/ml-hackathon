@@ -74,3 +74,5 @@ git branch -d feature/baseline-research
 # Удаляем ветку в удаленном репозитории
 git push origin --delete feature/baseline-research
 ```
+
+> **Примечание:** Мы используем команду `git switch` вместо старой `git checkout`. Она была введена в Git специально для работы с ветками, чтобы избежать путаницы, так как `checkout` также используется для восстановления файлов. `switch` безопаснее и понятнее по смыслу.
