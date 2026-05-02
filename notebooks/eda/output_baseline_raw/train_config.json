@@ -1,0 +1,11 @@
+{
+  "user_path": "/home/itj/ml-hackathon/data/train/user.csv",
+  "shift_path": "/home/itj/ml-hackathon/data/train/shift.csv",
+  "event_path": "/home/itj/ml-hackathon/data/train/event.csv",
+  "output_dir": "./output_baseline_raw",
+  "random_state": 42,
+  "max_iter": 1000,
+  "test_ratio": 0.2,
+  "skip_shap": false,
+  "shap_sample_size": 1000
+}
