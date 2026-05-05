@@ -19,6 +19,7 @@ VAL_DIR = DATA_DIR / "validation"
 SPLIT_DATE = pd.Timestamp("2026-02-15", tz="UTC")
 SPLIT_DATE_PLAIN = datetime.date(2026, 2, 15)  # для сравнения с date() объектами
 
+
 def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     print("Загружаем данные...")
     shifts = pd.read_csv(TRAIN_DIR / "shift.csv")
@@ -28,8 +29,11 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     shifts["start_at"] = pd.to_datetime(shifts["start_at"], utc=True)
     events["ts"] = pd.to_datetime(events["ts"], utc=True)
 
-    print(f"  Shifts:  {len(shifts):>7,} | {shifts['start_at'].min().date()} -> {shifts['start_at'].max().date()}")
-    print(f"  Events:  {len(events):>7,} | {events['ts'].min().date()} -> {events['ts'].max().date()}")
+    s_min, s_max = shifts["start_at"].min().date(), shifts["start_at"].max().date()
+    print(f"  Shifts:  {len(shifts):>7,} | {s_min} -> {s_max}")
+    print(
+        f"  Events:  {len(events):>7,} | {events['ts'].min().date()} -> {events['ts'].max().date()}"
+    )
     print(f"  Users:   {len(users):>7,}")
     print(f"  Event types: {events['interaction'].value_counts().to_dict()}")
     return shifts, events, users
@@ -57,10 +61,11 @@ def split_events(
     # Val events — события по валидационным сменам
     val_events = events[events["shift_id"].astype(str).isin(val_shift_ids)].copy()
 
-    print(f"События:")
+    print("События:")
     print(f"  Train events: {len(train_events):,}")
     print(f"  Val events:   {len(val_events):,}")
     return train_events, val_events
+
 
 def build_apply(events: pd.DataFrame, val_shifts: pd.DataFrame) -> pd.DataFrame:
     """
@@ -92,7 +97,7 @@ def build_apply(events: pd.DataFrame, val_shifts: pd.DataFrame) -> pd.DataFrame:
     apply["date"] = apply["ts"].dt.date
     apply = apply[["user_id", "shift_id", "date"]]
 
-    print(f"apply.csv:")
+    print("apply.csv:")
     print(f"  Записей APPLY (val, без SYSTEM_CANCEL): {len(apply):,}")
     print(f"  Уникальных пользователей: {apply['user_id'].nunique():,}")
     print(f"  Уникальных смен:          {apply['shift_id'].nunique():,}")
@@ -120,7 +125,7 @@ def save_files(
     apply.to_csv(VAL_DIR / "apply.csv", index=False)
     users.to_csv(VAL_DIR / "users.csv", index=False)
 
-    print(f"Файлы сохранены:")
+    print("Файлы сохранены:")
     for path in [
         TRAIN_DIR / "shift_train.csv",
         TRAIN_DIR / "event_train.csv",
@@ -138,7 +143,7 @@ def validate_split(
     val_shifts: pd.DataFrame,
     train_events: pd.DataFrame,
 ) -> None:
-    print(f"\nПроверка корректности сплита:")
+    print("\nПроверка корректности сплита:")
 
     # apply['date'] — python date объекты, сравниваем с datetime.date
     bad_dates = [d for d in apply["date"] if d < SPLIT_DATE_PLAIN]
@@ -156,7 +161,7 @@ def validate_split(
     if len(future_events) > 0:
         print(f"  [ОШИБКА] train_events содержит {len(future_events)} событий после split_date!")
     else:
-        print(f"  [OK] Train events не содержат утечек из будущего")
+        print("  [OK] Train events не содержат утечек из будущего")
 
 
 def main() -> None:
@@ -170,6 +175,7 @@ def main() -> None:
     apply = build_apply(events, val_shifts)
     validate_split(apply, val_shifts, train_events)
     save_files(train_shifts, train_events, val_shifts, val_events, apply, users)
+
 
 if __name__ == "__main__":
     main()

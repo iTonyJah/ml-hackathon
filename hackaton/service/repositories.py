@@ -2,6 +2,7 @@
 Repository — работа с SQLite базой данных.
 Кандидаты для predict отбираются по активности (количеству событий).
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable

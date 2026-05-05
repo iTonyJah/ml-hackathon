@@ -2,6 +2,7 @@
 PrepareManager — обучает ML модель и кэширует активных пользователей по локациям.
 Кэш используется при predict для быстрого получения кандидатов без SQL JOIN.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -63,8 +64,9 @@ class PrepareManager:
             events_rows = await cursor.fetchall()
             events = pd.DataFrame([dict(r) for r in events_rows]) if events_rows else pd.DataFrame()
 
-        LOGGER.info("Loaded from DB: users=%d, shifts=%d, events=%d",
-                    len(users), len(shifts), len(events))
+        LOGGER.info(
+            "Loaded from DB: users=%d, shifts=%d, events=%d", len(users), len(shifts), len(events)
+        )
         return users, shifts, events
 
     def _build_cache(self, users: pd.DataFrame, events: pd.DataFrame) -> None:
@@ -76,9 +78,7 @@ class PrepareManager:
         else:
             activity = pd.DataFrame(columns=["user_id", "n_events"])
 
-        users_with_activity = users.merge(
-            activity, left_on="id", right_on="user_id", how="left"
-        )
+        users_with_activity = users.merge(activity, left_on="id", right_on="user_id", how="left")
         users_with_activity["n_events"] = users_with_activity["n_events"].fillna(0).astype(int)
         users_with_activity = users_with_activity.sort_values("n_events", ascending=False)
 
@@ -94,6 +94,7 @@ class PrepareManager:
 
         # Кэш по локациям: ALL users (без ограничения — чтобы не пропустить аппликантов)
         from collections import defaultdict
+
         location_cache: dict[str, list[str]] = defaultdict(list)
         for _, row in users_with_activity.iterrows():
             location_cache[str(row["location_id"])].append(str(row["id"]))
@@ -103,8 +104,11 @@ class PrepareManager:
         # Глобальный топ — для cross-location кандидатов (fallback)
         self._global_top = users_with_activity["id"].astype(str).tolist()
 
-        LOGGER.info("Cache built: %d locations, %d users total",
-                    len(self._location_cache), len(self._users_cache))
+        LOGGER.info(
+            "Cache built: %d locations, %d users total",
+            len(self._location_cache),
+            len(self._users_cache),
+        )
 
     def get_candidates(self, location_id: str, need_mk: bool, limit: int) -> list[str]:
         """Возвращает кандидатов для предсказания.
