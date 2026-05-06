@@ -98,11 +98,11 @@ class HackatonRpcService:
             shift = request.shift
             pm = self.prepare_manager
 
-            # Шаг 1: получаем кандидатов из локации + глобальный fallback (без TOP-200 ограничения)
+            # Шаг 1: получаем кандидатов из локации + глобальный fallback
             candidates = pm.get_candidates(
                 location_id=shift.location_id,
                 need_mk=shift.need_mk,
-                limit=5000,  # все пользователи в локации + 500 кросс-локационных
+                limit=300,  # топ-300 по активности — достаточно для recall, меньше шума
             )
 
             if not candidates:
