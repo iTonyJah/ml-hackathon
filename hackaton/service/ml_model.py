@@ -64,6 +64,8 @@ class MLModel:
         self._cancel_map: dict[tuple[str, str], int] = {}
         # (user_id, shift_id) -> unix timestamp (seconds) of most recent APPLY to this shift
         self._apply_ts_map: dict[tuple[str, str], float] = {}
+        # Users with 0 applies but ≥1 finish: workers whose applies predate training window
+        self._sleeper_set: set[str] = set()
 
         # Vectorized inference cache — populated in build_inference_cache()
         self._inf_user_ids: list[str] = []
@@ -168,11 +170,17 @@ class MLModel:
         else:
             self._apply_ts_map = {}
 
+        self._sleeper_set = {
+            uid
+            for uid, stats in self._user_stats.items()
+            if stats.get("total_applies", 0) == 0 and stats.get("finish_rate", 0.0) > 0.0
+        }
         LOGGER.info(
-            "Built stats for %d users, %d employers, %d shift-apply pairs",
+            "Built stats for %d users, %d employers, %d shift-apply pairs, %d sleepers",
             len(self._user_stats),
             len(self._employer_stats),
             len(self._apply_map),
+            len(self._sleeper_set),
         )
 
     def build_inference_cache(self, users: pd.DataFrame) -> None:
@@ -416,7 +424,11 @@ class MLModel:
             if last_ts is not None:
                 days_ago = max(0.0, (shift_start_secs - last_ts) / 86400.0)
                 return (0, days_ago, -score)
-            return (1, 9999.0, -score)
+            if uid in self._sleeper_set:
+                # Sleeping workers (0 applies, ≥1 finish): applies predate training window
+                finish_rate = self._user_stats.get(uid, {}).get("finish_rate", 0.0)
+                return (1, -finish_rate, -score)
+            return (2, 0.0, -score)
 
         return sorted(scored, key=sort_key)
 
