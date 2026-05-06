@@ -2,7 +2,6 @@
 ML модель для предсказания выхода пользователя на смену.
 LightGBM + векторизованный inference по всем пользователям.
 """
-
 from __future__ import annotations
 
 import logging
@@ -16,31 +15,19 @@ LOGGER = logging.getLogger(__name__)
 class MLModel:
     FEATURE_NAMES = [
         # User history features
-        "user_apply_rate",
-        "user_finish_rate",
-        "user_cancel_rate",
-        "user_total_applies",
-        "user_total_views",
-        "user_active_days",
+        "user_apply_rate", "user_finish_rate", "user_cancel_rate",
+        "user_total_applies", "user_total_views", "user_active_days",
         "user_has_mk",
         # New: replaces useless user_is_strict_location (always False in dataset)
-        "user_location_applies",  # how many times user applied in this location
+        "user_location_applies",   # how many times user applied in this location
         "user_task_type_applies",  # how many times user applied to this task_type
         # Shift features
-        "shift_hour",
-        "shift_dayofweek",
-        "shift_hours",
-        "shift_reward",
-        "shift_capacity",
-        "shift_need_mk",
-        "shift_id_differential",
+        "shift_hour", "shift_dayofweek", "shift_hours", "shift_reward",
+        "shift_capacity", "shift_need_mk", "shift_id_differential",
         # Cross features
-        "location_match",
-        "mk_compatible",
-        "user_worked_with_employer",
-        "user_worked_at_workplace",
-        "employer_avg_fill_rate",
-        "user_reward_vs_avg",
+        "location_match", "mk_compatible",
+        "user_worked_with_employer", "user_worked_at_workplace",
+        "employer_avg_fill_rate", "user_reward_vs_avg",
         # Recurring shift: how many times user applied to this exact shift before
         "user_shift_apply_count",
         # Recurring shift outcome signals
@@ -64,8 +51,6 @@ class MLModel:
         self._cancel_map: dict[tuple[str, str], int] = {}
         # (user_id, shift_id) -> unix timestamp (seconds) of most recent APPLY to this shift
         self._apply_ts_map: dict[tuple[str, str], float] = {}
-        # Users with 0 applies but ≥1 finish: workers whose applies predate training window
-        self._sleeper_set: set[str] = set()
 
         # Vectorized inference cache — populated in build_inference_cache()
         self._inf_user_ids: list[str] = []
@@ -170,18 +155,8 @@ class MLModel:
         else:
             self._apply_ts_map = {}
 
-        self._sleeper_set = {
-            uid
-            for uid, stats in self._user_stats.items()
-            if stats.get("total_applies", 0) == 0 and stats.get("finish_rate", 0.0) > 0.0
-        }
-        LOGGER.info(
-            "Built stats for %d users, %d employers, %d shift-apply pairs, %d sleepers",
-            len(self._user_stats),
-            len(self._employer_stats),
-            len(self._apply_map),
-            len(self._sleeper_set),
-        )
+        LOGGER.info("Built stats for %d users, %d employers, %d shift-apply pairs",
+                    len(self._user_stats), len(self._employer_stats), len(self._apply_map))
 
     def build_inference_cache(self, users: pd.DataFrame) -> None:
         """Precompute numpy arrays for vectorized batch inference (all users)."""
@@ -277,9 +252,7 @@ class MLModel:
 
         last_apply_ts = self._apply_ts_map.get((uid_str, shift_id))
         if last_apply_ts is not None and start_at is not pd.NaT:
-            user_shift_apply_recency_days = max(
-                0.0, (start_at.timestamp() - last_apply_ts) / 86400.0
-            )
+            user_shift_apply_recency_days = max(0.0, (start_at.timestamp() - last_apply_ts) / 86400.0)
         else:
             user_shift_apply_recency_days = 9999.0
 
@@ -293,22 +266,12 @@ class MLModel:
             float(user_has_mk),
             user_location_applies,
             user_task_type_applies,
-            float(shift_hour),
-            float(shift_dayofweek),
-            float(shift_hours),
-            shift_reward,
-            float(shift_capacity),
-            float(shift_need_mk),
-            float(shift_id_differential),
-            float(location_match),
-            float(mk_compatible),
-            float(user_worked_with_employer),
-            float(user_worked_at_workplace),
-            employer_fill_rate,
-            user_reward_vs_avg,
-            user_shift_apply_count,
-            user_shift_finish_count,
-            user_shift_cancel_count,
+            float(shift_hour), float(shift_dayofweek), float(shift_hours), shift_reward,
+            float(shift_capacity), float(shift_need_mk), float(shift_id_differential),
+            float(location_match), float(mk_compatible),
+            float(user_worked_with_employer), float(user_worked_at_workplace),
+            employer_fill_rate, user_reward_vs_avg,
+            user_shift_apply_count, user_shift_finish_count, user_shift_cancel_count,
             user_shift_apply_recency_days,
         ]
 
@@ -321,29 +284,27 @@ class MLModel:
         sys_cancel_ids = set(
             events[events["interaction"] == "SYSTEM_CANCEL"]["shift_id"].astype(str)
         )
-        applies = (
-            events[
-                (events["interaction"] == "APPLY")
-                & (~events["shift_id"].astype(str).isin(sys_cancel_ids))
-            ][["user_id", "shift_id"]]
-            .drop_duplicates()
-            .copy()
-        )
+        applies = events[
+            (events["interaction"] == "APPLY") &
+            (~events["shift_id"].astype(str).isin(sys_cancel_ids))
+        ][["user_id", "shift_id"]].drop_duplicates().copy()
         applies["label"] = 1
 
-        views = (
-            events[events["interaction"] == "VIEW"][["user_id", "shift_id"]]
-            .drop_duplicates()
-            .copy()
-        )
+        views = events[
+            events["interaction"] == "VIEW"
+        ][["user_id", "shift_id"]].drop_duplicates().copy()
 
-        apply_pairs = set(zip(applies["user_id"].astype(str), applies["shift_id"].astype(str)))
+        apply_pairs = set(
+            zip(applies["user_id"].astype(str), applies["shift_id"].astype(str))
+        )
         views["has_apply"] = views.apply(
             lambda r: (str(r["user_id"]), str(r["shift_id"])) in apply_pairs, axis=1
         )
         negatives = views[~views["has_apply"]][["user_id", "shift_id"]].copy()
         negatives["label"] = 0
-        negatives = negatives.sample(n=min(len(negatives), len(applies) * 5), random_state=42)
+        negatives = negatives.sample(
+            n=min(len(negatives), len(applies) * 5), random_state=42
+        )
 
         LOGGER.info("Training data: pos=%d, neg=%d", len(applies), len(negatives))
         data = pd.concat([applies, negatives], ignore_index=True)
@@ -371,7 +332,6 @@ class MLModel:
 
         try:
             import lightgbm as lgb
-
             pos_weight = float((y == 0).sum()) / max(1, (y == 1).sum())
             self.model = lgb.LGBMClassifier(
                 n_estimators=500,
@@ -393,12 +353,9 @@ class MLModel:
         except ImportError:
             from sklearn.linear_model import LogisticRegression
             from sklearn.preprocessing import StandardScaler
-
             self._scaler = StandardScaler()
             X_scaled = self._scaler.fit_transform(X)
-            self.model = LogisticRegression(
-                C=1.0, max_iter=1000, random_state=42, class_weight="balanced"
-            )
+            self.model = LogisticRegression(C=1.0, max_iter=1000, random_state=42, class_weight="balanced")
             self.model.fit(X_scaled, y)
             self._use_scaler = True
             LOGGER.info("LogisticRegression trained, samples=%d", len(X))
@@ -417,18 +374,13 @@ class MLModel:
         Users who applied most recently to this exact shift rank first.
         Users with no prior apply rank after all prior-appliers.
         """
-
         def sort_key(item: tuple[str, float]) -> tuple[int, float, float]:
             uid, score = item
             last_ts = self._apply_ts_map.get((uid, shift_id))
             if last_ts is not None:
                 days_ago = max(0.0, (shift_start_secs - last_ts) / 86400.0)
                 return (0, days_ago, -score)
-            if uid in self._sleeper_set:
-                # Sleeping workers (0 applies, ≥1 finish): applies predate training window
-                finish_rate = self._user_stats.get(uid, {}).get("finish_rate", 0.0)
-                return (1, -finish_rate, -score)
-            return (2, 0.0, -score)
+            return (1, 9999.0, -score)
 
         return sorted(scored, key=sort_key)
 
@@ -439,19 +391,16 @@ class MLModel:
         shift_row: dict,
     ) -> list[tuple[str, float]]:
         if not self.is_trained or not user_ids:
-            return [
-                (uid, float(i) / max(1, len(user_ids))) for i, uid in enumerate(reversed(user_ids))
-            ]
+            return [(uid, float(i) / max(1, len(user_ids)))
+                    for i, uid in enumerate(reversed(user_ids))]
 
         # Use vectorized inference cache if available
         if self._inf_uid_to_idx:
             scored = self._predict_scores_vectorized(user_ids, shift_row)
         else:
             # Fallback: per-user feature construction
-            X_rows = [
-                self._make_features(str(uid), users_dict.get(str(uid), {}), shift_row)
-                for uid in user_ids
-            ]
+            X_rows = [self._make_features(str(uid), users_dict.get(str(uid), {}), shift_row)
+                      for uid in user_ids]
             X = np.array(X_rows, dtype=np.float32)
             if self._use_scaler and self._scaler is not None:
                 X = self._scaler.transform(X)
@@ -579,45 +528,26 @@ class MLModel:
             dtype=np.float32,
         )
 
-        X = np.column_stack(
-            [
-                col_apply_rate,
-                col_finish_rate,
-                col_cancel_rate,
-                col_total_applies,
-                col_total_views,
-                col_active_days,
-                col_has_mk,
-                col_location_applies,
-                col_task_type_applies,
-                col_shift_hour,
-                col_shift_dow,
-                col_shift_hours,
-                col_shift_reward,
-                col_shift_capacity,
-                col_shift_need_mk,
-                col_shift_id_diff,
-                col_location_match,
-                col_mk_compatible,
-                col_worked_employer,
-                col_worked_workplace,
-                col_employer_fill_rate,
-                col_reward_vs_avg,
-                col_shift_apply_count,
-                col_shift_finish_count,
-                col_shift_cancel_count,
-                col_apply_recency,
-            ]
-        )
+        X = np.column_stack([
+            col_apply_rate, col_finish_rate, col_cancel_rate,
+            col_total_applies, col_total_views, col_active_days,
+            col_has_mk, col_location_applies, col_task_type_applies,
+            col_shift_hour, col_shift_dow, col_shift_hours, col_shift_reward,
+            col_shift_capacity, col_shift_need_mk, col_shift_id_diff,
+            col_location_match, col_mk_compatible,
+            col_worked_employer, col_worked_workplace,
+            col_employer_fill_rate, col_reward_vs_avg,
+            col_shift_apply_count, col_shift_finish_count, col_shift_cancel_count,
+            col_apply_recency,
+        ])
 
         if self._use_scaler and self._scaler is not None:
             X = self._scaler.transform(X)
 
         scores = self.model.predict_proba(X)[:, 1]
 
-        result: list[tuple[str, float]] = [
-            (uid_strs[j], float(scores[k])) for k, j in enumerate(known_j)
-        ]
+        result: list[tuple[str, float]] = [(uid_strs[j], float(scores[k]))
+                                            for k, j in enumerate(known_j)]
         for j in unknown:
             result.append((uid_strs[j], 0.0))
 

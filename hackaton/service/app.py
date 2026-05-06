@@ -105,6 +105,15 @@ class HackatonRpcService:
                 limit=300,  # топ-300 по активности — достаточно для recall, меньше шума
             )
 
+            # До первого prepare кэш пуст — fallback к DB (только при старте сервиса)
+            if not candidates:
+                candidates = await self.repository.find_top_candidates(
+                    location_id=str(shift.location_id),
+                    need_mk=bool(shift.need_mk),
+                    limit=request.limit,
+                )
+            if not candidates:
+                candidates = await self.repository.fallback_candidates(limit=request.limit)
             if not candidates:
                 return {"user_ids": [], "status_code": 400, "detail": "no users loaded"}
 

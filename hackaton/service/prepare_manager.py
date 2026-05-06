@@ -20,7 +20,7 @@ LOGGER = logging.getLogger(__name__)
 @dataclass
 class PrepareState:
     running: bool = False
-    ready: bool = False
+    ready: bool = True
 
 
 class PrepareManager:
