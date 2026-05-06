@@ -24,7 +24,7 @@ class PrepareState:
 
 
 class PrepareManager:
-    def __init__(self, db_path: str, sleep_seconds: int = 0) -> None:
+    def __init__(self, sleep_seconds: int = 0, db_path: str = "") -> None:
         self._db_path = db_path
         self._state = PrepareState()
         self._task: asyncio.Task[None] | None = None
@@ -35,6 +35,7 @@ class PrepareManager:
         self._users_cache: dict[str, dict] = {}
         # Все пользователи отсортированные по активности (для predict)
         self._global_top: list[str] = []
+        self._location_cache: dict[str, list[str]] = {}
 
     @property
     def ready(self) -> bool:
@@ -134,6 +135,11 @@ class PrepareManager:
     async def _background_prepare(self) -> None:
         try:
             LOGGER.info("PrepareManager: starting background prepare")
+            if not self._db_path:
+                # No DB configured — sleep-only mode (used in tests)
+                await asyncio.sleep(self._sleep_seconds)
+                self._state.ready = True
+                return
             users, shifts, events = await self._load_data()
 
             if users.empty:

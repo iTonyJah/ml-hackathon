@@ -15,7 +15,7 @@ def build_service(tmp_path: Path) -> HackatonRpcService:
     db_path = str(tmp_path / "test.db")
     asyncio.run(init_db_for(db_path))
     repository = Repository(db_path=db_path)
-    prepare = PrepareManager(db_path=db_path, sleep_seconds=0)
+    prepare = PrepareManager(sleep_seconds=0)
     return HackatonRpcService(repository=repository, prepare=prepare)
 
 
@@ -71,17 +71,13 @@ def test_user_event_shift_and_predict_flow(tmp_path: Path) -> None:
     assert asyncio.run(service.shift(shifts_payload))["accepted"] == 1
     assert asyncio.run(service.event(events_payload))["accepted"] == 1
 
-    async def run_with_prepare() -> dict:
-        prepare_resp = await service.prepare(None)
-        assert prepare_resp["status_code"] == 200
-        # Wait until ready
-        for _ in range(50):
-            r = await service.ready(None)
-            if r.get("ready"):
-                break
-            await asyncio.sleep(0.1)
-        return await service.predict({"shift": shifts_payload["items"][0], "limit": 10})
-
-    predict_response = asyncio.run(run_with_prepare())
+    predict_response = asyncio.run(
+        service.predict(
+            {
+                "shift": shifts_payload["items"][0],
+                "limit": 10,
+            }
+        )
+    )
     assert predict_response["status_code"] == 200
     assert predict_response["user_ids"]
