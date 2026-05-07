@@ -91,16 +91,12 @@ def run_cv(
 
     max_ts = events["ts"].max()
     cutoff = max_ts - pd.Timedelta(days=val_days)
-    LOGGER.info(
-        "Cutoff: %s  (train < cutoff, val >= cutoff, val_days=%d)", cutoff.date(), val_days
-    )
+    LOGGER.info("Cutoff: %s  (train < cutoff, val >= cutoff, val_days=%d)", cutoff.date(), val_days)
 
     train_events = events[events["ts"] < cutoff].copy()
     val_events = events[events["ts"] >= cutoff].copy()
 
-    LOGGER.info(
-        "Split: train_events=%d  val_events=%d", len(train_events), len(val_events)
-    )
+    LOGGER.info("Split: train_events=%d  val_events=%d", len(train_events), len(val_events))
 
     # Ground truth for val: APPLY events in val window
     val_applies = (
@@ -114,9 +110,7 @@ def run_cv(
     # Val shifts: only those that have at least one APPLY in val window
     val_shift_ids = set(val_applies["shift_id"])
     val_shifts = shifts[shifts["id"].astype(str).isin(val_shift_ids)].copy()
-    LOGGER.info(
-        "Val: apply_events=%d  unique_shifts=%d", len(val_applies), len(val_shift_ids)
-    )
+    LOGGER.info("Val: apply_events=%d  unique_shifts=%d", len(val_applies), len(val_shift_ids))
 
     LOGGER.info("Training model on pre-cutoff data...")
     model = MLModel()
