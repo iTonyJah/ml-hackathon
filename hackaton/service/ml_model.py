@@ -57,6 +57,7 @@ class MLModel:
         self._employer_stats: dict[str, float] = {}
         self._scaler = None
         self._use_scaler = False
+        self._use_ranker = False
 
         # Maps (user_id, shift_id) -> count of prior interactions (for recurring shifts)
         self._apply_map: dict[tuple[str, str], int] = {}
@@ -361,20 +362,130 @@ class MLModel:
 
         return np.array(X_rows, dtype=np.float32), np.array(y_vals, dtype=np.int32)
 
+    def _build_training_data_ranked(
+        self,
+        events: pd.DataFrame,
+        shifts: pd.DataFrame,
+        users: pd.DataFrame,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Per-shift grouped data for LGBMRanker: returns X, y, group_sizes."""
+        sys_cancel_ids = set(
+            events[events["interaction"] == "SYSTEM_CANCEL"]["shift_id"].astype(str)
+        )
+        applies = (
+            events[
+                (events["interaction"] == "APPLY")
+                & (~events["shift_id"].astype(str).isin(sys_cancel_ids))
+            ][["user_id", "shift_id"]]
+            .drop_duplicates()
+            .copy()
+        )
+        views = (
+            events[events["interaction"] == "VIEW"][["user_id", "shift_id"]]
+            .drop_duplicates()
+            .copy()
+        )
+
+        apply_pairs = set(zip(applies["user_id"].astype(str), applies["shift_id"].astype(str)))
+        apply_shift_ids = set(applies["shift_id"].astype(str))
+
+        # Per-shift: positives = APPLY, negatives = VIEW-only (same shift)
+        all_pairs = pd.concat([applies, views]).drop_duplicates(["user_id", "shift_id"])
+        all_pairs = all_pairs[all_pairs["shift_id"].astype(str).isin(apply_shift_ids)].copy()
+        all_pairs["label"] = all_pairs.apply(
+            lambda r: 1 if (str(r["user_id"]), str(r["shift_id"])) in apply_pairs else 0,
+            axis=1,
+        )
+
+        users_dict = {str(r["id"]): r.to_dict() for _, r in users.iterrows()}
+        shifts_dict = {str(r["id"]): r.to_dict() for _, r in shifts.iterrows()}
+
+        X_rows: list = []
+        y_vals: list = []
+        groups: list = []
+
+        for shift_id, grp in all_pairs.groupby("shift_id"):
+            pos = grp[grp["label"] == 1]
+            neg = grp[grp["label"] == 0]
+            if len(pos) == 0 or len(neg) == 0:
+                continue
+            # Cap negatives: at most 10× positives per shift to keep groups balanced
+            if len(neg) > len(pos) * 10:
+                neg = neg.sample(n=len(pos) * 10, random_state=42)
+            chunk = pd.concat([pos, neg])
+            sid = str(shift_id)
+            shift_data = shifts_dict.get(sid, {})
+            for _, row in chunk.iterrows():
+                uid = str(row["user_id"])
+                X_rows.append(self._make_features(uid, users_dict.get(uid, {}), shift_data))
+                y_vals.append(int(row["label"]))
+            groups.append(len(chunk))
+
+        LOGGER.info(
+            "Ranked training data: %d groups (shifts), %d samples", len(groups), len(X_rows)
+        )
+        return (
+            np.array(X_rows, dtype=np.float32),
+            np.array(y_vals, dtype=np.int32),
+            np.array(groups, dtype=np.int32),
+        )
+
+    def _train_lgbm_ranker(
+        self, events: pd.DataFrame, shifts: pd.DataFrame, users: pd.DataFrame
+    ) -> bool:
+        """Train LGBMRanker. Returns True on success, False if data is insufficient."""
+        import lightgbm as lgb
+
+        X_r, y_r, groups = self._build_training_data_ranked(events, shifts, users)
+        if len(groups) < 10:
+            LOGGER.warning("Too few shift groups (%d) for ranker, skipping", len(groups))
+            return False
+
+        self.model = lgb.LGBMRanker(
+            objective="lambdarank",
+            metric="ndcg",
+            ndcg_eval_at=[4, 10],
+            n_estimators=500,
+            learning_rate=0.05,
+            num_leaves=63,
+            max_depth=6,
+            min_child_samples=5,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            n_jobs=2,
+            random_state=42,
+            verbose=-1,
+        )
+        self.model.fit(X_r, y_r, group=groups, feature_name=self.FEATURE_NAMES)
+        self._use_ranker = True
+        self._use_scaler = False
+        LOGGER.info("LGBMRanker trained: groups=%d samples=%d", len(groups), len(X_r))
+        return True
+
     def train(self, events: pd.DataFrame, shifts: pd.DataFrame, users: pd.DataFrame) -> None:
         self._build_user_stats(events, shifts)
-        X, y = self._build_training_data(events, shifts, users)
-
-        if len(X) == 0:
-            LOGGER.warning("No training data, skipping")
-            return
 
         try:
             import lightgbm as lgb
 
+            if self._train_lgbm_ranker(events, shifts, users):
+                self.is_trained = True
+                return
+
+            # Fallback: classifier with AUC early stopping
+            X, y = self._build_training_data(events, shifts, users)
+            if len(X) == 0:
+                LOGGER.warning("No training data, skipping")
+                return
+
+            from sklearn.model_selection import train_test_split
+
             pos_weight = float((y == 0).sum()) / max(1, (y == 1).sum())
+            X_tr, X_val, y_tr, y_val = train_test_split(
+                X, y, test_size=0.15, random_state=42, stratify=y
+            )
             self.model = lgb.LGBMClassifier(
-                n_estimators=500,
+                n_estimators=1000,
                 learning_rate=0.05,
                 num_leaves=63,
                 max_depth=6,
@@ -386,22 +497,42 @@ class MLModel:
                 random_state=42,
                 verbose=-1,
             )
-            self.model.fit(X, y)
+            self.model.fit(
+                X_tr,
+                y_tr,
+                eval_set=[(X_val, y_val)],
+                eval_metric="auc",
+                callbacks=[
+                    lgb.early_stopping(stopping_rounds=50, verbose=False),
+                    lgb.log_evaluation(period=-1),
+                ],
+            )
             self._use_scaler = False
-            LOGGER.info("LightGBM model trained, samples=%d", len(X))
+            self._use_ranker = False
+            LOGGER.info(
+                "LGBMClassifier trained: samples=%d best_iter=%d val_auc=%.4f",
+                len(X),
+                self.model.best_iteration_,
+                list(self.model.best_score_["valid_0"].values())[0],
+            )
 
         except ImportError:
             from sklearn.linear_model import LogisticRegression
             from sklearn.preprocessing import StandardScaler
 
+            X_fb, y_fb = self._build_training_data(events, shifts, users)
+            if len(X_fb) == 0:
+                LOGGER.warning("No training data, skipping")
+                return
             self._scaler = StandardScaler()
-            X_scaled = self._scaler.fit_transform(X)
+            X_scaled = self._scaler.fit_transform(X_fb)
             self.model = LogisticRegression(
                 C=1.0, max_iter=1000, random_state=42, class_weight="balanced"
             )
-            self.model.fit(X_scaled, y)
+            self.model.fit(X_scaled, y_fb)
             self._use_scaler = True
-            LOGGER.info("LogisticRegression trained, samples=%d", len(X))
+            self._use_ranker = False
+            LOGGER.info("LogisticRegression trained, samples=%d", len(X_fb))
 
         self.is_trained = True
 
@@ -455,7 +586,10 @@ class MLModel:
             X = np.array(X_rows, dtype=np.float32)
             if self._use_scaler and self._scaler is not None:
                 X = self._scaler.transform(X)
-            scores = self.model.predict_proba(X)[:, 1]
+            if self._use_ranker:
+                scores = self.model.predict(X)
+            else:
+                scores = self.model.predict_proba(X)[:, 1]
             scored = sorted(zip(user_ids, scores.tolist()), key=lambda x: x[1], reverse=True)
 
         # Re-rank: users who applied most recently to this exact shift rank first
@@ -613,7 +747,10 @@ class MLModel:
         if self._use_scaler and self._scaler is not None:
             X = self._scaler.transform(X)
 
-        scores = self.model.predict_proba(X)[:, 1]
+        if self._use_ranker:
+            scores = self.model.predict(X)
+        else:
+            scores = self.model.predict_proba(X)[:, 1]
 
         result: list[tuple[str, float]] = [
             (uid_strs[j], float(scores[k])) for k, j in enumerate(known_j)

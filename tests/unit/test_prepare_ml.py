@@ -25,9 +25,56 @@ def test_prepare_trains_ml_model(tmp_path: Path) -> None:
     service = build_ml_service(tmp_path)
     now = datetime.now(tz=UTC).isoformat()
 
-    asyncio.run(service.user({"items": [{"id": "u1", "location_id": "loc-1", "is_strict_location": False, "has_mk": True}]}))
-    asyncio.run(service.shift({"items": [{"id": "s1", "start_at": now, "location_id": "loc-1", "task_type": "picker", "employer_id": "emp-1", "workplace_id": "wp-1", "need_mk": False, "id_differential": False, "hours": 8, "reward": 1000.0, "capacity": 2}]}))
-    asyncio.run(service.event({"items": [{"id": str(uuid4()), "shift_id": "s1", "user_id": "u1", "interaction": "APPLY", "ts": now}]}))
+    asyncio.run(
+        service.user(
+            {
+                "items": [
+                    {
+                        "id": "u1",
+                        "location_id": "loc-1",
+                        "is_strict_location": False,
+                        "has_mk": True,
+                    }
+                ]
+            }
+        )
+    )
+    asyncio.run(
+        service.shift(
+            {
+                "items": [
+                    {
+                        "id": "s1",
+                        "start_at": now,
+                        "location_id": "loc-1",
+                        "task_type": "picker",
+                        "employer_id": "emp-1",
+                        "workplace_id": "wp-1",
+                        "need_mk": False,
+                        "id_differential": False,
+                        "hours": 8,
+                        "reward": 1000.0,
+                        "capacity": 2,
+                    }
+                ]
+            }
+        )
+    )
+    asyncio.run(
+        service.event(
+            {
+                "items": [
+                    {
+                        "id": str(uuid4()),
+                        "shift_id": "s1",
+                        "user_id": "u1",
+                        "interaction": "APPLY",
+                        "ts": now,
+                    }
+                ]
+            }
+        )
+    )
 
     async def run_prepare() -> None:
         resp = await service.prepare(None)
@@ -47,9 +94,56 @@ def test_predict_after_ml_prepare(tmp_path: Path) -> None:
     service = build_ml_service(tmp_path)
     now = datetime.now(tz=UTC).isoformat()
 
-    asyncio.run(service.user({"items": [{"id": "u1", "location_id": "loc-1", "is_strict_location": False, "has_mk": True}]}))
-    asyncio.run(service.shift({"items": [{"id": "s1", "start_at": now, "location_id": "loc-1", "task_type": "picker", "employer_id": "emp-1", "workplace_id": "wp-1", "need_mk": False, "id_differential": False, "hours": 8, "reward": 1000.0, "capacity": 2}]}))
-    asyncio.run(service.event({"items": [{"id": str(uuid4()), "shift_id": "s1", "user_id": "u1", "interaction": "VIEW", "ts": now}]}))
+    asyncio.run(
+        service.user(
+            {
+                "items": [
+                    {
+                        "id": "u1",
+                        "location_id": "loc-1",
+                        "is_strict_location": False,
+                        "has_mk": True,
+                    }
+                ]
+            }
+        )
+    )
+    asyncio.run(
+        service.shift(
+            {
+                "items": [
+                    {
+                        "id": "s1",
+                        "start_at": now,
+                        "location_id": "loc-1",
+                        "task_type": "picker",
+                        "employer_id": "emp-1",
+                        "workplace_id": "wp-1",
+                        "need_mk": False,
+                        "id_differential": False,
+                        "hours": 8,
+                        "reward": 1000.0,
+                        "capacity": 2,
+                    }
+                ]
+            }
+        )
+    )
+    asyncio.run(
+        service.event(
+            {
+                "items": [
+                    {
+                        "id": str(uuid4()),
+                        "shift_id": "s1",
+                        "user_id": "u1",
+                        "interaction": "VIEW",
+                        "ts": now,
+                    }
+                ]
+            }
+        )
+    )
 
     async def run() -> dict:
         await service.prepare(None)
@@ -58,7 +152,24 @@ def test_predict_after_ml_prepare(tmp_path: Path) -> None:
             if r.get("ready"):
                 break
             await asyncio.sleep(0.05)
-        return await service.predict({"shift": {"id": "s1", "start_at": now, "location_id": "loc-1", "task_type": "picker", "employer_id": "emp-1", "workplace_id": "wp-1", "need_mk": False, "id_differential": False, "hours": 8, "reward": 1000.0, "capacity": 2}, "limit": 10})
+        return await service.predict(
+            {
+                "shift": {
+                    "id": "s1",
+                    "start_at": now,
+                    "location_id": "loc-1",
+                    "task_type": "picker",
+                    "employer_id": "emp-1",
+                    "workplace_id": "wp-1",
+                    "need_mk": False,
+                    "id_differential": False,
+                    "hours": 8,
+                    "reward": 1000.0,
+                    "capacity": 2,
+                },
+                "limit": 10,
+            }
+        )
 
     result = asyncio.run(run())
     assert result["status_code"] == 200
