@@ -1032,3 +1032,78 @@ prepare_avg_sec: 12.2
 Вывод: ML reranker дает `+0.0346960365342719` absolute к целевой метрике при практически неизменном
 `predict p95`. Основная цена ML - рост `prepare` примерно с `5.0s` до `12.2s`, что допустимо для
 текущего регламента, потому что тяжелая работа выполняется в `prepare`, а не в `predict`.
+
+## 19. Notebook для сравнения ROC-AUC метрик
+
+Добавлен аналитический notebook:
+
+```text
+notebooks/roc_auc_metric_comparison.ipynb
+```
+
+Цель notebook — сравнить текущую локальную метрику из `hackaton/eval/metric.py` с альтернативной
+интерпретацией проверки, где используется фиксированный `roc_auc_score(..., max_fpr=0.1)`.
+
+Важно: контрактные файлы evaluator и unit-тесты не менялись. Notebook работает как отдельный
+аналитический артефакт и не влияет на локальный eval pipeline.
+
+### 19.1. Что делает notebook
+
+Notebook:
+
+- собирает или загружает cached prediction frame;
+- повторяет текущую локальную формулу метрики:
+  `TOP-10 -> TOP-capacity -> max_fpr = min(1.0, capacity / 10)`;
+- считает альтернативный вариант:
+  `TOP-10 -> roc_auc_score(..., max_fpr=0.1)`;
+- сравнивает overall ROC-AUC;
+- показывает расхождения по `date/capacity`;
+- строит heatmap delta между вариантами;
+- строит ROC-кривые для отдельных смен с двумя классами в TOP-10.
+
+Prediction cache сохраняется локально в:
+
+```text
+artifacts/notebook_metric_comparison/predictions.csv
+```
+
+`artifacts/` остается ignored и не добавляется в commit.
+
+### 19.2. Результаты текущего прогона
+
+На собранном prediction frame:
+
+```text
+rows: 2640
+shifts: 264
+positive candidates in TOP-10: 96
+```
+
+Сравнение метрик:
+
+```text
+current local evaluator:
+overall_roc_auc: 0.957852
+evaluated_shift_metrics: 25
+evaluated_group_metrics: 16
+
+possible final checker, fixed max_fpr=0.1:
+overall_roc_auc: 0.754555
+evaluated_shift_metrics: 66
+evaluated_group_metrics: 34
+
+delta_vs_current: -0.203297
+```
+
+### 19.3. Вывод
+
+Текущая локальная метрика остается основной для проверки проекта, потому что она закреплена в
+`REGLAMENT.md` и `hackaton/eval/metric.py`.
+
+При этом notebook показывает, что вариант с фиксированным `max_fpr=0.1` строже оценивает качество
+ранжирования внутри всего TOP-10. Локальная формула часто оценивает меньше смен, потому что после
+обрезки до TOP-`capacity` для малых `capacity` не всегда остаются оба класса для ROC-AUC.
+
+Практический вывод для следующих экспериментов: не менять evaluator, но оптимизировать выдачу так,
+чтобы true `APPLY` пользователи поднимались как можно выше во всем TOP-10, а не только внутри первых
+`capacity` позиций.
