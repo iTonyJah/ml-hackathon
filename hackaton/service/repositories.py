@@ -9,8 +9,9 @@ from hackaton.service.ml_reranker import MlReranker
 
 
 class Repository:
-    def __init__(self, db_path: str) -> None:
+    def __init__(self, db_path: str, enable_ml_reranker: bool = True) -> None:
         self.db_path = db_path
+        self.enable_ml_reranker = enable_ml_reranker
         self.reranker = MlReranker()
 
     async def upsert_users(self, users: Iterable[UserDTO]) -> int:
@@ -182,6 +183,9 @@ class Repository:
         await self._fit_reranker()
 
     async def _fit_reranker(self) -> None:
+        if not self.enable_ml_reranker:
+            self.reranker.reset()
+            return
         rows = await self._fetch_reranker_training_rows()
         self.reranker.fit(rows)
 
@@ -305,7 +309,7 @@ class Repository:
 
     async def find_scored_candidates(self, shift: ShiftDTO, limit: int) -> list[str]:
         rows = await self._find_candidate_feature_rows(shift=shift, limit=limit)
-        model_scores = self.reranker.predict_proba(rows)
+        model_scores = self.reranker.predict_proba(rows) if self.enable_ml_reranker else None
         if model_scores is not None:
             rule_scores = [float(row["rule_score"]) for row in rows]
             min_rule_score = min(rule_scores)

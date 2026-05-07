@@ -19,6 +19,14 @@ def build_service(tmp_path: Path) -> HackatonRpcService:
     return HackatonRpcService(repository=repository, prepare=prepare)
 
 
+def build_service_without_ml(tmp_path: Path) -> HackatonRpcService:
+    db_path = str(tmp_path / "test.db")
+    asyncio.run(init_db_for(db_path))
+    repository = Repository(db_path=db_path, enable_ml_reranker=False)
+    prepare = PrepareManager(sleep_seconds=0)
+    return HackatonRpcService(repository=repository, prepare=prepare)
+
+
 async def wait_until_ready(service: HackatonRpcService) -> None:
     for _ in range(50):
         ready_response = await service.ready(None)
@@ -309,5 +317,88 @@ def test_prepare_trains_ml_reranker_when_labels_have_two_classes(tmp_path: Path)
         assert service.repository.reranker.ready
         assert service.repository.reranker.train_rows == 4
         assert service.repository.reranker.positive_rows == 2
+
+    asyncio.run(scenario())
+
+
+def test_prepare_can_skip_ml_reranker(tmp_path: Path) -> None:
+    service = build_service_without_ml(tmp_path)
+
+    async def scenario() -> None:
+        now = datetime.now(tz=UTC).isoformat()
+        users_payload = {
+            "items": [
+                {
+                    "id": "u_apply",
+                    "location_id": "loc-1",
+                    "is_strict_location": False,
+                    "has_mk": True,
+                },
+                {
+                    "id": "u_view",
+                    "location_id": "loc-1",
+                    "is_strict_location": False,
+                    "has_mk": True,
+                },
+            ]
+        }
+        shifts_payload = {
+            "items": [
+                {
+                    "id": "s-positive",
+                    "start_at": now,
+                    "location_id": "loc-1",
+                    "task_type": "picker",
+                    "employer_id": "emp-1",
+                    "workplace_id": "wp-1",
+                    "need_mk": True,
+                    "id_differential": False,
+                    "hours": 8,
+                    "reward": 1200.0,
+                    "capacity": 2,
+                },
+                {
+                    "id": "s-negative",
+                    "start_at": now,
+                    "location_id": "loc-1",
+                    "task_type": "picker",
+                    "employer_id": "emp-1",
+                    "workplace_id": "wp-1",
+                    "need_mk": True,
+                    "id_differential": False,
+                    "hours": 8,
+                    "reward": 1200.0,
+                    "capacity": 2,
+                },
+            ]
+        }
+        events_payload = {
+            "items": [
+                {
+                    "id": str(uuid4()),
+                    "shift_id": "s-positive",
+                    "user_id": "u_apply",
+                    "interaction": "APPLY",
+                    "ts": now,
+                },
+                {
+                    "id": str(uuid4()),
+                    "shift_id": "s-negative",
+                    "user_id": "u_view",
+                    "interaction": "VIEW",
+                    "ts": now,
+                },
+            ]
+        }
+
+        assert (await service.user(users_payload))["accepted"] == 2
+        assert (await service.shift(shifts_payload))["accepted"] == 2
+        assert (await service.event(events_payload))["accepted"] == 2
+        assert (await service.prepare(None))["status_code"] == 200
+        await wait_until_ready(service)
+
+        assert not service.repository.reranker.ready
+        assert service.repository.reranker.train_rows == 0
+        assert service.repository.reranker.positive_rows == 0
 
     asyncio.run(scenario())

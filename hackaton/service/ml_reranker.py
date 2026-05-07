@@ -49,8 +49,13 @@ class MlReranker:
     def ready(self) -> bool:
         return self.model is not None
 
-    def fit(self, rows: list[dict[str, object]]) -> bool:
+    def reset(self) -> None:
         self.model = None
+        self.train_rows = 0
+        self.positive_rows = 0
+
+    def fit(self, rows: list[dict[str, object]]) -> bool:
+        self.reset()
         self.train_rows = len(rows)
         self.positive_rows = int(sum(int(row["target"]) for row in rows))
         if len(rows) < 4:

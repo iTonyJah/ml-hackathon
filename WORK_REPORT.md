@@ -950,3 +950,85 @@ days_evaluated: 13
 Вывод: ML reranker улучшил локальную метрику примерно на `+0.0347` absolute при сохранении приемлемой
 latency. Для регламентно чистой локальной проверки стоит использовать `--predict-max-rpm 180`, хотя
 штатный `make load-test` оставлен с дефолтом `LOAD_TEST_MAX_RPM=200`.
+
+## 18. Ablation ML reranker
+
+### 18.1. Переключатель ML
+
+Добавлен runtime-переключатель:
+
+```text
+ENABLE_ML_RERANKER=0|1
+```
+
+Поведение:
+
+- `ENABLE_ML_RERANKER=1` или отсутствие переменной: `prepare` обучает ML reranker, `predict`
+  применяет blend ranking;
+- `ENABLE_ML_RERANKER=0`: `prepare` пересобирает агрегаты, но не обучает модель, а `predict`
+  использует только rule/history ranking.
+
+Это позволяет проверять вклад ML без изменения кода и без риска потерять рабочий fallback.
+
+### 18.2. Контрольный eval без ML
+
+Сервис был запущен с отключенным reranker:
+
+```bash
+APP_HOST=127.0.0.1 \
+APP_PORT=8007 \
+DB_PATH=./data/hackaton_eval_ml_off_8007.db \
+PREPARE_SLEEP_SECONDS=0 \
+ENABLE_ML_RERANKER=0 \
+poetry run python -m hackaton.service.main
+```
+
+Eval:
+
+```bash
+poetry run python -m hackaton.eval.cli run \
+  --host 127.0.0.1 \
+  --port 8007 \
+  --user-path data/train_split/user.csv \
+  --shift-path data/train_split/shift.csv \
+  --event-path data/train_split/event.csv \
+  --val-apply-path data/validation/apply.csv \
+  --val-shift-path data/validation/shift.csv \
+  --val-event-path data/validation/event.csv \
+  --output-dir artifacts/eval_ablation_ml_off_rpm180 \
+  --predict-max-concurrency 4 \
+  --predict-max-rpm 180
+```
+
+Результат:
+
+```text
+overall_target_metric: 0.9231554801407742
+predict_latency_p50_ms: 29.983
+predict_latency_p80_ms: 34.527
+predict_latency_p95_ms: 40.508
+predict_rpm: 188.271
+prepare_duration_avg_sec: 5.0
+stop_reason: completed
+days_evaluated: 13
+```
+
+### 18.3. Сравнение
+
+```text
+ML off / rule-history only:
+overall_target_metric: 0.9231554801407742
+predict_p95_ms: 40.508
+predict_rpm: 188.271
+prepare_avg_sec: 5.0
+
+ML on / blend reranker:
+overall_target_metric: 0.9578515166750461
+predict_p95_ms: 40.491
+predict_rpm: 188.104
+prepare_avg_sec: 12.2
+```
+
+Вывод: ML reranker дает `+0.0346960365342719` absolute к целевой метрике при практически неизменном
+`predict p95`. Основная цена ML - рост `prepare` примерно с `5.0s` до `12.2s`, что допустимо для
+текущего регламента, потому что тяжелая работа выполняется в `prepare`, а не в `predict`.

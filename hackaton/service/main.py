@@ -14,7 +14,10 @@ LOGGER = logging.getLogger(__name__)
 # Use thread mode to keep shared in-memory state (prepare/ready) consistent.
 server = ZeroServer(host=settings.app_host, port=settings.app_port, use_threads=True)
 service = HackatonRpcService(
-    repository=Repository(db_path=settings.db_path),
+    repository=Repository(
+        db_path=settings.db_path,
+        enable_ml_reranker=settings.enable_ml_reranker,
+    ),
     prepare=PrepareManager(settings.prepare_sleep_seconds),
 )
 
@@ -80,11 +83,13 @@ def run() -> None:
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
     LOGGER.info(
-        "Starting service: host=%s port=%s db_path=%s prepare_sleep_seconds=%s",
+        "Starting service: host=%s port=%s db_path=%s prepare_sleep_seconds=%s "
+        "enable_ml_reranker=%s",
         settings.app_host,
         settings.app_port,
         settings.db_path,
         settings.prepare_sleep_seconds,
+        settings.enable_ml_reranker,
     )
     asyncio.run(init_db())
     LOGGER.info("Database initialized successfully, starting RPC server")
