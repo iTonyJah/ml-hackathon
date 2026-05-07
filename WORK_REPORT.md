@@ -710,3 +710,54 @@ days_evaluated: 13
 Вывод: после приведения `apply.csv` к официальной методике локальная метрика не просела. Это
 подтверждает, что прирост дает не ошибочное включение `FINISHED` в labels, а history-based ranking по
 событиям и сущностям смены.
+
+### 15.5. Контрольный eval с запасом по RPM
+
+Так как в предыдущих eval-отчетах итоговый `predict_rpm` получался немного выше `200`, был проведен
+контрольный запуск с более консервативным лимитом:
+
+```bash
+APP_HOST=127.0.0.1 \
+APP_PORT=8003 \
+DB_PATH=./data/hackaton_eval_rpm180_8003.db \
+PREPARE_SLEEP_SECONDS=0 \
+poetry run python -m hackaton.service.main
+```
+
+```bash
+poetry run python -m hackaton.eval.cli run \
+  --host 127.0.0.1 \
+  --port 8003 \
+  --user-path data/train_split/user.csv \
+  --shift-path data/train_split/shift.csv \
+  --event-path data/train_split/event.csv \
+  --val-apply-path data/validation/apply.csv \
+  --val-shift-path data/validation/shift.csv \
+  --val-event-path data/validation/event.csv \
+  --output-dir artifacts/eval_official_rpm180 \
+  --predict-max-concurrency 4 \
+  --predict-max-rpm 180
+```
+
+Итоговый отчет:
+
+```text
+artifacts/eval_official_rpm180/eval_report.md
+```
+
+Ключевые значения:
+
+```text
+overall_target_metric: 0.9231554801407742
+predict_latency_p50_ms: 33.580
+predict_latency_p80_ms: 36.710
+predict_latency_p95_ms: 39.646
+predict_rpm: 188.181
+prepare_duration_avg_sec: 0.0
+stop_reason: completed
+days_evaluated: 13
+```
+
+Вывод: при `--predict-max-rpm 180` итоговый `predict_rpm` остается ниже регламентного порога `200`, а
+целевая метрика не меняется. Для финальной проверки предпочтительно использовать этот более
+консервативный режим запуска eval/load-test.
