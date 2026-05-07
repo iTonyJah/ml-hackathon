@@ -761,3 +761,61 @@ days_evaluated: 13
 Вывод: при `--predict-max-rpm 180` итоговый `predict_rpm` остается ниже регламентного порога `200`, а
 целевая метрика не меняется. Для финальной проверки предпочтительно использовать этот более
 консервативный режим запуска eval/load-test.
+
+## 16. Нагрузочная проверка predict
+
+### 16.1. Доработка Makefile
+
+В проектных инструкциях был указан шаг `make load-test`, но в `Makefile` такой цели не было. Добавлена
+цель `load-test`, которая запускает существующий скрипт `scripts/load_test.py`.
+
+Цель параметризована через переменные:
+
+```text
+LOAD_TEST_HOST
+LOAD_TEST_PORT
+LOAD_TEST_REQUESTS
+LOAD_TEST_MAX_RPM
+LOAD_TEST_RPC_TIMEOUT_MS
+LOAD_TEST_REPORT
+```
+
+По умолчанию `LOAD_TEST_MAX_RPM=180`, чтобы нагрузочная проверка соответствовала консервативному
+режиму, уже проверенному через eval.
+
+### 16.2. Запуск load-test
+
+Сервис был поднят на отдельном порту и отдельной БД:
+
+```bash
+APP_HOST=127.0.0.1 \
+APP_PORT=8004 \
+DB_PATH=./data/hackaton_load_test_8004.db \
+PREPARE_SLEEP_SECONDS=0 \
+poetry run python -m hackaton.service.main
+```
+
+Нагрузочная проверка:
+
+```bash
+make load-test \
+  LOAD_TEST_PORT=8004 \
+  LOAD_TEST_MAX_RPM=180 \
+  LOAD_TEST_REQUESTS=100 \
+  LOAD_TEST_REPORT=artifacts/load_test/load_test_rpm180_report.md
+```
+
+Результат:
+
+```text
+p50_ms: 3.404
+p80_ms: 5.816
+p95_ms: 9.433
+rpm: 181.717
+ok_calls: 100
+failed_calls: 0
+```
+
+Вывод: `predict` выдерживает контрольную нагрузку с запасом по latency; все 100 вызовов завершились
+успешно, отказов не было. Итоговый RPM немного выше `180` из-за погрешности локального throttle в
+скрипте, но остается ниже регламентного `predict_max_rpm <= 200`.
