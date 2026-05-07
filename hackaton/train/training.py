@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import shap
 from sklearn.compose import ColumnTransformer
-from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
@@ -226,10 +226,21 @@ def _build_pipeline(
     preprocessor = ColumnTransformer(
         transformers=[
             ("num", StandardScaler(), numeric_features),
-            ("cat", OneHotEncoder(handle_unknown="ignore"), categorical_features),
-        ]
+            (
+                "cat",
+                OneHotEncoder(handle_unknown="ignore", sparse_output=False),
+                categorical_features,
+            ),
+        ],
+        sparse_threshold=0.0,
     )
-    model = LogisticRegression(max_iter=max_iter, random_state=random_state, solver="lbfgs")
+    model = HistGradientBoostingClassifier(
+        max_iter=max_iter,
+        learning_rate=0.06,
+        max_leaf_nodes=31,
+        l2_regularization=0.05,
+        random_state=random_state,
+    )
     return Pipeline(steps=[("preprocessor", preprocessor), ("model", model)])
 
 
@@ -262,7 +273,7 @@ def _generate_shap_plots(
     x_test_sample = x_test_arr[:n]
     x_train_sample = x_train_arr[: min(sample_size, x_train_arr.shape[0])]
 
-    explainer = shap.LinearExplainer(model, x_train_sample)
+    explainer = shap.Explainer(model, x_train_sample)
     shap_values = explainer(x_test_sample)
 
     summary_path = plots_dir / "shap_summary.png"
@@ -362,7 +373,7 @@ def run_training(cfg: TrainConfig) -> dict[str, object]:
     LOGGER.info("Feature sample:\n%s", x_train.head(5).to_string(index=False))
 
     # """ EXTENSION POINT: swap baseline model/pipeline while keeping artifact contract stable. """
-    LOGGER.info("Stage 5/8: Fitting LogisticRegression baseline")
+    LOGGER.info("Stage 5/8: Fitting HistGradientBoostingClassifier baseline")
     pipeline = _build_pipeline(
         numeric_features, categorical_features, cfg.random_state, cfg.max_iter
     )

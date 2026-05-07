@@ -820,3 +820,133 @@ failed_calls: 0
 Вывод: `predict` выдерживает контрольную нагрузку с запасом по latency; все 100 вызовов завершились
 успешно, отказов не было. Итоговый RPM немного выше `180` из-за погрешности локального throttle в
 скрипте, но остается ниже регламентного `predict_max_rpm <= 200`.
+
+## 17. Внедрение ML-модели в online inference
+
+### 17.1. Что изменено
+
+Добавлен ML reranker поверх уже работающей candidate generation:
+
+- `prepare` после пересборки агрегатов обучает `HistGradientBoostingClassifier` на накопленных
+  парах `user_id`/`shift_id`;
+- positive label: наличие `APPLY`;
+- negative label: пары с историческим событием без `APPLY`;
+- пары с `SYSTEM_CANCEL` исключаются из обучения по аналогии с методикой оценки;
+- `predict` берет расширенный пул до 200 кандидатов, считает online features и переупорядочивает пул;
+- если данных мало или в target только один класс, модель не активируется и остается прежний
+  rule/history fallback.
+
+Итоговый online score сделан консервативным:
+
+```text
+ml_score = 0.75 * normalized_rule_score + 0.25 * model_proba
+```
+
+Так модель реально влияет на ранжирование, но сильный history-based baseline остается основным
+стабилизирующим сигналом.
+
+### 17.2. Offline baseline
+
+Offline training baseline в `hackaton/train/training.py` переведен с `LogisticRegression` на
+`HistGradientBoostingClassifier` без добавления новых зависимостей. Контракт артефактов сохранен:
+`model.pkl`, `metrics.json`, `feature_schema.json`, `train_report.md`.
+
+### 17.3. Тесты
+
+Добавлен unit-тест, который проверяет, что `prepare` действительно обучает ML reranker, когда в
+истории есть оба класса label:
+
+```text
+tests/unit/test_service_smoke.py::test_prepare_trains_ml_reranker_when_labels_have_two_classes
+```
+
+Промежуточная проверка:
+
+```bash
+poetry run pytest tests/unit/test_service_smoke.py tests/unit/test_train_smoke.py --no-cov
+```
+
+Результат:
+
+```text
+5 passed
+```
+
+### 17.4. Исправление prepare после появления обучения
+
+Первый eval после добавления обучения выявил проблему: при `PREPARE_SLEEP_SECONDS=0` метод `prepare`
+выполнял callback синхронно. После добавления обучения ML-модели это стало занимать около 10 секунд,
+и RPC-клиент успевал получить timeout на самом вызове `prepare`.
+
+Исправление:
+
+- `PrepareManager.start()` теперь всегда запускает подготовку в background task;
+- RPC `prepare` быстро возвращает `status=started`;
+- `ready` остается единственной точкой ожидания окончания пересборки агрегатов и обучения модели;
+- e2e contract test не менялся.
+
+### 17.5. Eval после внедрения ML reranker
+
+Eval при `--predict-max-rpm 200`:
+
+```bash
+APP_HOST=127.0.0.1 \
+APP_PORT=8005 \
+DB_PATH=./data/hackaton_eval_ml_8005.db \
+PREPARE_SLEEP_SECONDS=0 \
+poetry run python -m hackaton.service.main
+```
+
+```bash
+poetry run python -m hackaton.eval.cli run \
+  --host 127.0.0.1 \
+  --port 8005 \
+  --user-path data/train_split/user.csv \
+  --shift-path data/train_split/shift.csv \
+  --event-path data/train_split/event.csv \
+  --val-apply-path data/validation/apply.csv \
+  --val-shift-path data/validation/shift.csv \
+  --val-event-path data/validation/event.csv \
+  --output-dir artifacts/eval_ml_reranker_rpm200 \
+  --predict-max-concurrency 4 \
+  --predict-max-rpm 200
+```
+
+Результат:
+
+```text
+overall_target_metric: 0.9578515166750461
+predict_latency_p50_ms: 32.877
+predict_latency_p80_ms: 37.705
+predict_latency_p95_ms: 43.316
+predict_rpm: 208.840
+prepare_duration_avg_sec: 10.0
+stop_reason: completed
+days_evaluated: 13
+```
+
+Метрика выросла относительно предыдущего контрольного результата `0.9231554801407742`, но фактический
+RPM снова оказался выше `200` из-за погрешности локального throttle.
+
+Контрольный eval при `--predict-max-rpm 180`:
+
+```text
+artifacts/eval_ml_reranker_rpm180/eval_report.md
+```
+
+Результат:
+
+```text
+overall_target_metric: 0.9578515166750461
+predict_latency_p50_ms: 30.518
+predict_latency_p80_ms: 36.171
+predict_latency_p95_ms: 40.491
+predict_rpm: 188.104
+prepare_duration_avg_sec: 12.2
+stop_reason: completed
+days_evaluated: 13
+```
+
+Вывод: ML reranker улучшил локальную метрику примерно на `+0.0347` absolute при сохранении приемлемой
+latency. Для регламентно чистой локальной проверки стоит использовать `--predict-max-rpm 180`, хотя
+штатный `make load-test` оставлен с дефолтом `LOAD_TEST_MAX_RPM=200`.

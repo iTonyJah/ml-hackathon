@@ -95,10 +95,12 @@ class HackatonRpcService:
             except ValidationError as exc:
                 return {"user_ids": [], "status_code": 422, "detail": str(exc)}
 
+            candidate_pool_limit = max(request.limit, 200)
             candidates = await self.repository.find_scored_candidates(
                 shift=request.shift,
-                limit=request.limit,
+                limit=candidate_pool_limit,
             )
+            candidates = candidates[: request.limit]
             if not candidates:
                 candidates = await self.repository.find_top_candidates(
                     location_id=request.shift.location_id,
