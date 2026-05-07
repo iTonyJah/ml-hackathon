@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
-
-POSITIVE_INTERACTIONS = {"APPLY", "FINISHED"}
+POSITIVE_INTERACTION = "APPLY"
+EXCLUDED_INTERACTION = "SYSTEM_CANCEL"
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +97,7 @@ def split_train_validation(
     train_events: list[dict[str, str]] = []
     validation_events: list[dict[str, str]] = []
     apply_keys: set[tuple[str, str, str]] = set()
+    excluded_apply_keys: set[tuple[str, str, str]] = set()
 
     for row in events:
         event_date = _parse_date(row["ts"])
@@ -106,14 +107,21 @@ def split_train_validation(
             train_events.append(row)
         elif event_date >= cutoff:
             validation_events.append(row)
-        if shift_id in validation_shift_ids and interaction in POSITIVE_INTERACTIONS:
+        if shift_id in validation_shift_ids:
             # The eval contract groups labels by the shift day.
             shift_day = validation_shift_dates[shift_id]
-            apply_keys.add((str(row["user_id"]), shift_id, shift_day.isoformat()))
+            label_key = (str(row["user_id"]), shift_id, shift_day.isoformat())
+            if interaction == POSITIVE_INTERACTION:
+                apply_keys.add(label_key)
+            elif interaction == EXCLUDED_INTERACTION:
+                excluded_apply_keys.add(label_key)
 
     validation_apply = [
         {"user_id": user_id, "shift_id": shift_id, "date": apply_date}
-        for user_id, shift_id, apply_date in sorted(apply_keys, key=lambda x: (x[2], x[1], x[0]))
+        for user_id, shift_id, apply_date in sorted(
+            apply_keys - excluded_apply_keys,
+            key=lambda x: (x[2], x[1], x[0]),
+        )
     ]
 
     output_paths = [

@@ -37,9 +37,52 @@ CREATE TABLE IF NOT EXISTS events (
     ts TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS user_features (
+    user_id TEXT PRIMARY KEY,
+    view_cnt INTEGER NOT NULL DEFAULT 0,
+    apply_cnt INTEGER NOT NULL DEFAULT 0,
+    finished_cnt INTEGER NOT NULL DEFAULT 0,
+    user_cancel_cnt INTEGER NOT NULL DEFAULT 0,
+    system_cancel_cnt INTEGER NOT NULL DEFAULT 0,
+    avg_reward_per_hour REAL
+);
+
+CREATE TABLE IF NOT EXISTS user_task_features (
+    user_id TEXT NOT NULL,
+    task_type TEXT NOT NULL,
+    view_cnt INTEGER NOT NULL DEFAULT 0,
+    apply_cnt INTEGER NOT NULL DEFAULT 0,
+    finished_cnt INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, task_type)
+);
+
+CREATE TABLE IF NOT EXISTS user_employer_features (
+    user_id TEXT NOT NULL,
+    employer_id TEXT NOT NULL,
+    view_cnt INTEGER NOT NULL DEFAULT 0,
+    apply_cnt INTEGER NOT NULL DEFAULT 0,
+    finished_cnt INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, employer_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_workplace_features (
+    user_id TEXT NOT NULL,
+    workplace_id TEXT NOT NULL,
+    view_cnt INTEGER NOT NULL DEFAULT 0,
+    apply_cnt INTEGER NOT NULL DEFAULT 0,
+    finished_cnt INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, workplace_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_events_shift_id ON events(shift_id);
 CREATE INDEX IF NOT EXISTS idx_events_user_id ON events(user_id);
 CREATE INDEX IF NOT EXISTS idx_shifts_location_id ON shifts(location_id);
+CREATE INDEX IF NOT EXISTS idx_user_features_finished ON user_features(finished_cnt);
+CREATE INDEX IF NOT EXISTS idx_user_task_features_task ON user_task_features(task_type);
+CREATE INDEX IF NOT EXISTS idx_user_employer_features_employer
+    ON user_employer_features(employer_id);
+CREATE INDEX IF NOT EXISTS idx_user_workplace_features_workplace
+    ON user_workplace_features(workplace_id);
 """
 
 

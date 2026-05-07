@@ -85,13 +85,98 @@ class Repository:
         return len(payload)
 
     async def count_table(self, table_name: str) -> int:
-        if table_name not in {"users", "events", "shifts"}:
+        if table_name not in {
+            "users",
+            "events",
+            "shifts",
+            "user_features",
+            "user_task_features",
+            "user_employer_features",
+            "user_workplace_features",
+        }:
             raise ValueError(f"unsupported table: {table_name}")
         query = f"SELECT COUNT(1) FROM {table_name}"  # nosec - table is validated above
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(query)
             row = await cursor.fetchone()
         return int(row[0]) if row else 0
+
+    async def rebuild_features(self) -> None:
+        query = """
+        DELETE FROM user_features;
+        DELETE FROM user_task_features;
+        DELETE FROM user_employer_features;
+        DELETE FROM user_workplace_features;
+
+        INSERT INTO user_features (
+            user_id,
+            view_cnt,
+            apply_cnt,
+            finished_cnt,
+            user_cancel_cnt,
+            system_cancel_cnt,
+            avg_reward_per_hour
+        )
+        SELECT
+            e.user_id,
+            SUM(CASE WHEN e.interaction = 'VIEW' THEN 1 ELSE 0 END) AS view_cnt,
+            SUM(CASE WHEN e.interaction = 'APPLY' THEN 1 ELSE 0 END) AS apply_cnt,
+            SUM(CASE WHEN e.interaction = 'FINISHED' THEN 1 ELSE 0 END) AS finished_cnt,
+            SUM(CASE WHEN e.interaction = 'USER_CANCEL' THEN 1 ELSE 0 END) AS user_cancel_cnt,
+            SUM(CASE WHEN e.interaction = 'SYSTEM_CANCEL' THEN 1 ELSE 0 END) AS system_cancel_cnt,
+            AVG(
+                CASE
+                    WHEN e.interaction IN ('APPLY', 'FINISHED') AND s.hours > 0
+                    THEN s.reward / s.hours
+                    ELSE NULL
+                END
+            ) AS avg_reward_per_hour
+        FROM events e
+        LEFT JOIN shifts s ON s.id = e.shift_id
+        GROUP BY e.user_id;
+
+        INSERT INTO user_task_features (
+            user_id, task_type, view_cnt, apply_cnt, finished_cnt
+        )
+        SELECT
+            e.user_id,
+            s.task_type,
+            SUM(CASE WHEN e.interaction = 'VIEW' THEN 1 ELSE 0 END) AS view_cnt,
+            SUM(CASE WHEN e.interaction = 'APPLY' THEN 1 ELSE 0 END) AS apply_cnt,
+            SUM(CASE WHEN e.interaction = 'FINISHED' THEN 1 ELSE 0 END) AS finished_cnt
+        FROM events e
+        JOIN shifts s ON s.id = e.shift_id
+        GROUP BY e.user_id, s.task_type;
+
+        INSERT INTO user_employer_features (
+            user_id, employer_id, view_cnt, apply_cnt, finished_cnt
+        )
+        SELECT
+            e.user_id,
+            s.employer_id,
+            SUM(CASE WHEN e.interaction = 'VIEW' THEN 1 ELSE 0 END) AS view_cnt,
+            SUM(CASE WHEN e.interaction = 'APPLY' THEN 1 ELSE 0 END) AS apply_cnt,
+            SUM(CASE WHEN e.interaction = 'FINISHED' THEN 1 ELSE 0 END) AS finished_cnt
+        FROM events e
+        JOIN shifts s ON s.id = e.shift_id
+        GROUP BY e.user_id, s.employer_id;
+
+        INSERT INTO user_workplace_features (
+            user_id, workplace_id, view_cnt, apply_cnt, finished_cnt
+        )
+        SELECT
+            e.user_id,
+            s.workplace_id,
+            SUM(CASE WHEN e.interaction = 'VIEW' THEN 1 ELSE 0 END) AS view_cnt,
+            SUM(CASE WHEN e.interaction = 'APPLY' THEN 1 ELSE 0 END) AS apply_cnt,
+            SUM(CASE WHEN e.interaction = 'FINISHED' THEN 1 ELSE 0 END) AS finished_cnt
+        FROM events e
+        JOIN shifts s ON s.id = e.shift_id
+        GROUP BY e.user_id, s.workplace_id;
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.executescript(query)
+            await db.commit()
 
     async def find_top_candidates(
         self,
@@ -109,6 +194,70 @@ class Repository:
         """
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(query, (location_id, int(need_mk), limit))
+            rows = await cursor.fetchall()
+        return [row[0] for row in rows]
+
+    async def find_scored_candidates(self, shift: ShiftDTO, limit: int) -> list[str]:
+        reward_per_hour = float(shift.reward) / shift.hours if shift.hours else 0.0
+        query = """
+        SELECT
+            u.id,
+            (
+                CASE WHEN u.location_id = ? THEN 30.0 ELSE 0.0 END
+                + CASE WHEN u.has_mk = 1 THEN 8.0 ELSE 0.0 END
+                + CASE WHEN u.is_strict_location = 1 AND u.location_id = ? THEN 5.0 ELSE 0.0 END
+                + COALESCE(uf.finished_cnt, 0) * 3.0
+                + COALESCE(uf.apply_cnt, 0) * 2.0
+                + COALESCE(uf.view_cnt, 0) * 0.15
+                - COALESCE(uf.user_cancel_cnt, 0) * 1.5
+                - COALESCE(uf.system_cancel_cnt, 0) * 0.5
+                + COALESCE(utf.finished_cnt, 0) * 12.0
+                + COALESCE(utf.apply_cnt, 0) * 7.0
+                + COALESCE(utf.view_cnt, 0) * 0.5
+                + COALESCE(uef.finished_cnt, 0) * 18.0
+                + COALESCE(uef.apply_cnt, 0) * 9.0
+                + COALESCE(uef.view_cnt, 0) * 0.5
+                + COALESCE(uwf.finished_cnt, 0) * 24.0
+                + COALESCE(uwf.apply_cnt, 0) * 12.0
+                + COALESCE(uwf.view_cnt, 0) * 0.5
+                - CASE
+                    WHEN uf.avg_reward_per_hour IS NULL THEN 0.0
+                    ELSE MIN(20.0, ABS(uf.avg_reward_per_hour - ?)) * 0.05
+                  END
+            ) AS score
+        FROM users u
+        LEFT JOIN user_features uf ON uf.user_id = u.id
+        LEFT JOIN user_task_features utf
+            ON utf.user_id = u.id AND utf.task_type = ?
+        LEFT JOIN user_employer_features uef
+            ON uef.user_id = u.id AND uef.employer_id = ?
+        LEFT JOIN user_workplace_features uwf
+            ON uwf.user_id = u.id AND uwf.workplace_id = ?
+        WHERE (? = 0 OR u.has_mk = 1)
+          AND (
+              u.location_id = ?
+              OR u.is_strict_location = 0
+              OR utf.user_id IS NOT NULL
+              OR uef.user_id IS NOT NULL
+              OR uwf.user_id IS NOT NULL
+          )
+        ORDER BY score DESC, u.location_id = ? DESC, u.has_mk DESC, u.id ASC
+        LIMIT ?
+        """
+        params = (
+            shift.location_id,
+            shift.location_id,
+            reward_per_hour,
+            shift.task_type,
+            shift.employer_id,
+            shift.workplace_id,
+            int(shift.need_mk),
+            shift.location_id,
+            shift.location_id,
+            limit,
+        )
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(query, params)
             rows = await cursor.fetchall()
         return [row[0] for row in rows]
 

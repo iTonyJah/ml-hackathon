@@ -129,16 +129,23 @@ validation-период.
 data/validation/apply.csv
 ```
 
-Он формируется автоматически из позитивных взаимодействий пользователей с validation-сменами.
+Он формируется автоматически из взаимодействий `APPLY` пользователей с validation-сменами.
 
-Позитивными взаимодействиями считаются:
+Позитивным взаимодействием для локального eval считается только:
 
 ```text
 APPLY
-FINISHED
 ```
 
-Для каждого такого события скрипт добавляет строку:
+`FINISHED` не добавляется в `apply.csv` как label, потому что по официальной методике positive target
+для оценки — только запись на смену через `APPLY`.
+
+Если для пары `(user_id, shift_id, date)` есть цепочка с `SYSTEM_CANCEL`, такая пара исключается из
+`apply.csv`, даже если в этой же цепочке был `APPLY`. При этом сами события `VIEW`, `USER_CANCEL`,
+`SYSTEM_CANCEL` и `FINISHED` остаются в `event.csv` и могут использоваться сервисом как исторические
+признаки.
+
+Для каждого подходящего `APPLY` скрипт добавляет строку:
 
 ```text
 user_id,shift_id,date
@@ -405,3 +412,301 @@ train CSV до eval-ready validation-набора:
 3. `OUR-CHANGES.md` описывает, как пользоваться новым сценарием.
 4. `tests/unit/test_split_train_validation.py` фиксирует ключевой контракт split-логики.
 5. `WORK_REPORT.md` фиксирует подробный отчет о выполненной работе.
+
+## 13. Доработка online inference через prepare-time aggregates
+
+Следующим этапом начата реализация пункта 3 рабочего плана: закрытие разрыва между offline training
+и online inference.
+
+### 13.1. Изменения в схеме БД
+
+В `hackaton/service/db.py` добавлены materialized feature-таблицы:
+
+```text
+user_features
+user_task_features
+user_employer_features
+user_workplace_features
+```
+
+Они предназначены для быстрых online-запросов в `predict`, чтобы не выполнять тяжелую агрегацию по
+сырым `events` на каждый входящий shift.
+
+### 13.2. Полезная работа в prepare
+
+В `hackaton/service/repositories.py` добавлен метод:
+
+```text
+Repository.rebuild_features()
+```
+
+Он перестраивает агрегаты по истории событий:
+
+- общая активность пользователя: `VIEW`, `APPLY`, `FINISHED`;
+- отмены: `USER_CANCEL`, `SYSTEM_CANCEL`;
+- история по `task_type`;
+- история по `employer_id`;
+- история по `workplace_id`;
+- средний `reward/hour` по позитивным взаимодействиям.
+
+В `hackaton/service/prepare_manager.py` добавлена возможность выполнять async callback во время
+`prepare`. Теперь `HackatonRpcService.prepare()` передает туда `Repository.rebuild_features`, поэтому
+`prepare` больше не является только sleep-заглушкой.
+
+### 13.3. Новый online scoring в predict
+
+В `hackaton/service/repositories.py` добавлен метод:
+
+```text
+Repository.find_scored_candidates()
+```
+
+`predict` теперь сначала использует scored ranking, а старый `location_id + has_mk` SQL оставлен как
+fallback для пустых случаев.
+
+Скоринг учитывает:
+
+- совпадение `location_id`;
+- `has_mk` при необходимости МК;
+- `is_strict_location`;
+- общую историю пользователя;
+- историю по `task_type`;
+- историю по `employer_id`;
+- историю по `workplace_id`;
+- штрафы за отмены;
+- близость к пользовательскому `reward/hour`.
+
+Это промежуточный rule-based ranking без подключения `model.pkl`. Такой шаг выбран намеренно: он
+быстро усиливает online baseline и готовит структуру для последующего model-based scoring.
+
+### 13.4. Добавленные проверки
+
+В `tests/unit/test_service_smoke.py` добавлен сценарий, который проверяет:
+
+- `prepare` создает feature-агрегаты;
+- история `FINISHED`/`APPLY` по совпадающим `task_type`, `employer_id`, `workplace_id` влияет на
+  порядок выдачи;
+- пользователь с релевантной историей может обогнать пользователя из той же локации.
+
+`tests/e2e/test_rpc_api_contract_e2e.py` не изменялся. Существующий контракт 503 во время подготовки
+и 200 после готовности сохранен за счет реализации `PrepareManager`, где callback подготовки и
+ожидание выполняются в одном background prepare-цикле.
+
+### 13.5. Проверки после доработки
+
+Запущена точечная проверка:
+
+```bash
+poetry run pytest tests/unit/test_service_smoke.py tests/e2e/test_rpc_api_contract_e2e.py
+```
+
+Результат:
+
+```text
+5 passed
+coverage: 92.31%
+```
+
+В ограниченном sandbox `aiosqlite` зависал на подключении к SQLite, поэтому тест был запущен с
+разрешенным выполнением вне sandbox. Это связано с окружением запуска, а не с логикой сервиса.
+
+## 14. Eval после доработки prepare-time aggregates
+
+После внедрения prepare-time агрегатов и scored ranking был запущен локальный eval на текущем
+train/validation split.
+
+### 14.1. Команда запуска сервиса
+
+Порт `8000` был занят другим процессом, поэтому текущая версия сервиса была поднята на `8001` с
+отдельной eval-БД:
+
+```bash
+APP_HOST=127.0.0.1 \
+APP_PORT=8001 \
+DB_PATH=./data/hackaton_eval_current_8001.db \
+PREPARE_SLEEP_SECONDS=0 \
+poetry run python -m hackaton.service.main
+```
+
+### 14.2. Команда eval
+
+Eval запускался на локальном split-наборе:
+
+```bash
+poetry run python -m hackaton.eval.cli run \
+  --host 127.0.0.1 \
+  --port 8001 \
+  --user-path data/train_split/user.csv \
+  --shift-path data/train_split/shift.csv \
+  --event-path data/train_split/event.csv \
+  --val-apply-path data/validation/apply.csv \
+  --val-shift-path data/validation/shift.csv \
+  --val-event-path data/validation/event.csv \
+  --output-dir artifacts/eval_scored_prepare \
+  --predict-max-concurrency 4 \
+  --predict-max-rpm 200
+```
+
+Первый запуск eval внутри sandbox завершился ошибкой ZeroMQ connection timeout на bootstrap upload.
+Повторный запуск вне sandbox прошел успешно. Это соответствует ранее обнаруженному ограничению
+локального sandbox для `aiosqlite`/ZeroMQ.
+
+### 14.3. Результат
+
+Итоговый отчет:
+
+```text
+artifacts/eval_scored_prepare/eval_report.md
+```
+
+Ключевые значения:
+
+```text
+overall_target_metric: 0.9171458647561589
+predict_latency_p50_ms: 24.824
+predict_latency_p80_ms: 28.467
+predict_latency_p95_ms: 32.920
+predict_rpm: 209.173
+prepare_duration_avg_sec: 0.0
+stop_reason: completed
+days_evaluated: 13
+```
+
+Сравнение с предыдущим baseline:
+
+```text
+baseline overall_target_metric: 0.3838612368024133
+current overall_target_metric: 0.9171458647561589
+absolute gain: +0.5332846279537456
+```
+
+Вывод: перенос истории событий в prepare-time агрегаты и использование scored ranking дали
+существенный прирост локальной validation-метрики относительно `location_id + has_mk` baseline.
+
+### 14.4. Наблюдения и риски
+
+- `predict_latency_p95_ms` вырос до `32.920 ms`, но остается низким для текущего локального eval.
+- `predict_rpm` в отчете равен `209.173`, хотя eval запускался с `--predict-max-rpm 200`.
+  Аналогичное превышение уже наблюдалось в baseline-отчете, но перед финальной сдачей это нужно
+  перепроверить и при необходимости запускать eval/load-test с более консервативными параметрами.
+- `prepare_duration_avg_sec` в отчете равен `0.0`, потому что evaluator измеряет prepare/ready
+  контракт, а не отдельное внутреннее время SQL rebuild. По логам дневные prepare-переходы занимали
+  около нескольких секунд wall-clock между post-day upload и следующим днем.
+
+## 15. Приведение local validation к официальной методике оценки
+
+После сверки с методикой оценки выяснилось, что локальный split формировал `apply.csv` слишком широко:
+в positive labels попадали не только `APPLY`, но и `FINISHED`.
+
+Официальная методика задает другой контракт:
+
+- `APPLY` считается positive label;
+- отсутствие `APPLY` считается negative label;
+- `VIEW` и `USER_CANCEL` без последующего `APPLY` считаются negative label;
+- цепочки с `SYSTEM_CANCEL` исключаются из оценки, даже если в цепочке был `APPLY`;
+- `VIEW`, `USER_CANCEL`, `SYSTEM_CANCEL` можно использовать как исторические признаки.
+
+### 15.1. Изменения в split-скрипте
+
+В `scripts/split_train_validation.py` изменено формирование `data/validation/apply.csv`:
+
+- positive label теперь создается только по `APPLY`;
+- `FINISHED` больше не добавляется в `apply.csv`;
+- пары `(user_id, shift_id, date)` с `SYSTEM_CANCEL` исключаются из `apply.csv`;
+- validation `event.csv` сохраняет все события как исторические данные.
+
+### 15.2. Тесты методики
+
+В `tests/unit/test_split_train_validation.py` добавлен сценарий:
+
+- `APPLY` попадает в `apply.csv`;
+- `FINISHED` без `APPLY` не попадает в `apply.csv`;
+- `APPLY` вместе с `SYSTEM_CANCEL` исключается из `apply.csv`.
+
+Проверки:
+
+```bash
+poetry run pytest tests/unit/test_split_train_validation.py --no-cov
+poetry run pytest tests/unit/test_service_smoke.py tests/e2e/test_rpc_api_contract_e2e.py
+poetry run ruff check scripts/split_train_validation.py tests/unit/test_split_train_validation.py \
+  hackaton/service/app.py hackaton/service/db.py hackaton/service/prepare_manager.py \
+  hackaton/service/repositories.py tests/unit/test_service_smoke.py
+```
+
+Результат:
+
+```text
+split tests: 2 passed
+service/e2e tests: 5 passed, coverage 92.31%
+ruff: All checks passed
+```
+
+### 15.3. Пересборка validation
+
+После изменения методики локальный split был пересобран:
+
+```bash
+poetry run python scripts/split_train_validation.py --force
+```
+
+Результат:
+
+```text
+cutoff_date: 2026-02-16
+train_users: 5154
+train_shifts: 39734
+train_events: 381129
+validation_shifts: 265
+validation_events: 767
+validation_apply: 215
+```
+
+### 15.4. Повторный eval
+
+Повторный eval запускался на отдельном порту и отдельной БД:
+
+```bash
+APP_HOST=127.0.0.1 \
+APP_PORT=8002 \
+DB_PATH=./data/hackaton_eval_official_8002.db \
+PREPARE_SLEEP_SECONDS=0 \
+poetry run python -m hackaton.service.main
+```
+
+```bash
+poetry run python -m hackaton.eval.cli run \
+  --host 127.0.0.1 \
+  --port 8002 \
+  --user-path data/train_split/user.csv \
+  --shift-path data/train_split/shift.csv \
+  --event-path data/train_split/event.csv \
+  --val-apply-path data/validation/apply.csv \
+  --val-shift-path data/validation/shift.csv \
+  --val-event-path data/validation/event.csv \
+  --output-dir artifacts/eval_official_methodology \
+  --predict-max-concurrency 4 \
+  --predict-max-rpm 200
+```
+
+Итоговый отчет:
+
+```text
+artifacts/eval_official_methodology/eval_report.md
+```
+
+Ключевые значения:
+
+```text
+overall_target_metric: 0.9231554801407742
+predict_latency_p50_ms: 28.086
+predict_latency_p80_ms: 32.008
+predict_latency_p95_ms: 36.151
+predict_rpm: 209.129
+prepare_duration_avg_sec: 0.0
+stop_reason: completed
+days_evaluated: 13
+```
+
+Вывод: после приведения `apply.csv` к официальной методике локальная метрика не просела. Это
+подтверждает, что прирост дает не ошибочное включение `FINISHED` в labels, а history-based ranking по
+событиям и сущностям смены.

@@ -51,5 +51,6 @@ Main growth area: offline training exists, but online inference is still almost 
 - `data/train`, `data/train_split`, and `data/validation` currently exist.
 - Baseline eval reports currently exist under `artifacts/eval_baseline` and `artifacts/eval_strict_split`.
 - `hackaton/train/training.py` still uses `LogisticRegression`.
-- `hackaton/service/repositories.py` still has rule-based candidate selection by location and `has_mk`.
-- `hackaton/service/prepare_manager.py` currently only simulates preparation with sleep.
+- `hackaton/service/repositories.py` now has prepare-time aggregate rebuild and scored candidate selection.
+- `hackaton/service/prepare_manager.py` can run async prepare callbacks and is wired to rebuild online features.
+- Online inference is still rule-based, but it now uses event-history aggregates instead of only `location_id` and `has_mk`.

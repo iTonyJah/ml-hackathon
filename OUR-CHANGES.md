@@ -22,6 +22,13 @@ python3 scripts/split_train_validation.py --force
 - train-часть в `data/train_split`;
 - validation-часть в `data/validation`.
 
+`data/validation/apply.csv` формируется по официальной методике локальной оценки:
+
+- positive label создается только по событию `APPLY`;
+- `FINISHED` не считается label для `apply.csv`;
+- цепочки с `SYSTEM_CANCEL` исключаются из `apply.csv`;
+- остальные validation-события остаются в `event.csv` и могут использоваться как история.
+
 ## Eval после локального разбиения
 
 После запуска `scripts/split_train_validation.py` используйте validation-файлы из

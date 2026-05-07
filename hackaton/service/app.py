@@ -71,7 +71,7 @@ class HackatonRpcService:
         REQUEST_COUNT.labels("prepare").inc()
         with REQUEST_LATENCY.labels("prepare").time():
             LOGGER.info("RPC prepare called")
-            started = await self.prepare_manager.start()
+            started = await self.prepare_manager.start(self.repository.rebuild_features)
             if not started:
                 return {"status": "already_running", "status_code": 409}
             return {"status": "started", "status_code": 200}
@@ -95,15 +95,16 @@ class HackatonRpcService:
             except ValidationError as exc:
                 return {"user_ids": [], "status_code": 422, "detail": str(exc)}
 
-            """
-                EXTENSION POINT
-                Ваше решение должно быть здесь.
-            """
-            candidates = await self.repository.find_top_candidates(
-                location_id=request.shift.location_id,
-                need_mk=request.shift.need_mk,
+            candidates = await self.repository.find_scored_candidates(
+                shift=request.shift,
                 limit=request.limit,
             )
+            if not candidates:
+                candidates = await self.repository.find_top_candidates(
+                    location_id=request.shift.location_id,
+                    need_mk=request.shift.need_mk,
+                    limit=request.limit,
+                )
             if not candidates:
                 candidates = await self.repository.fallback_candidates(limit=request.limit)
             if not candidates:

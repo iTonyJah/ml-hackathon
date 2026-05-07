@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 
@@ -20,17 +21,28 @@ class PrepareManager:
     def ready(self) -> bool:
         return self._state.ready and not self._state.running
 
-    async def start(self) -> bool:
+    async def start(self, callback: Callable[[], Awaitable[None]] | None = None) -> bool:
         if self._state.running:
             return False
         self._state.running = True
         self._state.ready = False
-        self._task = asyncio.create_task(self._background_prepare())
+        if self._sleep_seconds <= 0:
+            try:
+                if callback is not None:
+                    await callback()
+                self._state.ready = True
+            finally:
+                self._state.running = False
+            return True
+        self._task = asyncio.create_task(self._background_prepare(callback))
         return True
 
-    async def _background_prepare(self) -> None:
+    async def _background_prepare(self, callback: Callable[[], Awaitable[None]] | None) -> None:
         try:
-            await asyncio.sleep(self._sleep_seconds)
+            tasks: list[Awaitable[object]] = [asyncio.sleep(self._sleep_seconds)]
+            if callback is not None:
+                tasks.append(callback())
+            await asyncio.gather(*tasks)
             self._state.ready = True
         finally:
             self._state.running = False
