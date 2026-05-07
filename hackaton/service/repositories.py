@@ -9,9 +9,15 @@ from hackaton.service.ml_reranker import MlReranker
 
 
 class Repository:
-    def __init__(self, db_path: str, enable_ml_reranker: bool = True) -> None:
+    def __init__(
+        self,
+        db_path: str,
+        enable_ml_reranker: bool = True,
+        ml_reranker_weight: float = 0.25,
+    ) -> None:
         self.db_path = db_path
         self.enable_ml_reranker = enable_ml_reranker
+        self.ml_reranker_weight = min(1.0, max(0.0, ml_reranker_weight))
         self.reranker = MlReranker()
 
     async def upsert_users(self, users: Iterable[UserDTO]) -> int:
@@ -232,17 +238,49 @@ class Repository:
             COALESCE(uf.view_cnt, 0) AS view_cnt,
             COALESCE(uf.apply_cnt, 0) AS apply_cnt,
             COALESCE(uf.finished_cnt, 0) AS finished_cnt,
+            COALESCE(uf.apply_cnt, 0) * 1.0
+                / MAX(1, COALESCE(uf.view_cnt, 0) + COALESCE(uf.apply_cnt, 0))
+                AS user_apply_rate,
+            COALESCE(uf.finished_cnt, 0) * 1.0 / MAX(1, COALESCE(uf.apply_cnt, 0))
+                AS user_finish_rate,
+            MAX(0, COALESCE(uf.view_cnt, 0) - COALESCE(uf.apply_cnt, 0)) * 1.0
+                / MAX(1, COALESCE(uf.view_cnt, 0) + COALESCE(uf.apply_cnt, 0))
+                AS user_view_without_apply_rate,
             COALESCE(uf.user_cancel_cnt, 0) AS user_cancel_cnt,
             COALESCE(uf.system_cancel_cnt, 0) AS system_cancel_cnt,
             COALESCE(utf.view_cnt, 0) AS task_view_cnt,
             COALESCE(utf.apply_cnt, 0) AS task_apply_cnt,
             COALESCE(utf.finished_cnt, 0) AS task_finished_cnt,
+            COALESCE(utf.apply_cnt, 0) * 1.0
+                / MAX(1, COALESCE(utf.view_cnt, 0) + COALESCE(utf.apply_cnt, 0))
+                AS task_apply_rate,
+            COALESCE(utf.finished_cnt, 0) * 1.0 / MAX(1, COALESCE(utf.apply_cnt, 0))
+                AS task_finish_rate,
+            MAX(0, COALESCE(utf.view_cnt, 0) - COALESCE(utf.apply_cnt, 0)) * 1.0
+                / MAX(1, COALESCE(utf.view_cnt, 0) + COALESCE(utf.apply_cnt, 0))
+                AS task_view_without_apply_rate,
             COALESCE(uef.view_cnt, 0) AS employer_view_cnt,
             COALESCE(uef.apply_cnt, 0) AS employer_apply_cnt,
             COALESCE(uef.finished_cnt, 0) AS employer_finished_cnt,
+            COALESCE(uef.apply_cnt, 0) * 1.0
+                / MAX(1, COALESCE(uef.view_cnt, 0) + COALESCE(uef.apply_cnt, 0))
+                AS employer_apply_rate,
+            COALESCE(uef.finished_cnt, 0) * 1.0 / MAX(1, COALESCE(uef.apply_cnt, 0))
+                AS employer_finish_rate,
+            MAX(0, COALESCE(uef.view_cnt, 0) - COALESCE(uef.apply_cnt, 0)) * 1.0
+                / MAX(1, COALESCE(uef.view_cnt, 0) + COALESCE(uef.apply_cnt, 0))
+                AS employer_view_without_apply_rate,
             COALESCE(uwf.view_cnt, 0) AS workplace_view_cnt,
             COALESCE(uwf.apply_cnt, 0) AS workplace_apply_cnt,
             COALESCE(uwf.finished_cnt, 0) AS workplace_finished_cnt,
+            COALESCE(uwf.apply_cnt, 0) * 1.0
+                / MAX(1, COALESCE(uwf.view_cnt, 0) + COALESCE(uwf.apply_cnt, 0))
+                AS workplace_apply_rate,
+            COALESCE(uwf.finished_cnt, 0) * 1.0 / MAX(1, COALESCE(uwf.apply_cnt, 0))
+                AS workplace_finish_rate,
+            MAX(0, COALESCE(uwf.view_cnt, 0) - COALESCE(uwf.apply_cnt, 0)) * 1.0
+                / MAX(1, COALESCE(uwf.view_cnt, 0) + COALESCE(uwf.apply_cnt, 0))
+                AS workplace_view_without_apply_rate,
             (
                 CASE WHEN u.location_id = s.location_id THEN 30.0 ELSE 0.0 END
                 + CASE WHEN u.has_mk = 1 THEN 8.0 ELSE 0.0 END
@@ -264,6 +302,20 @@ class Repository:
                 + COALESCE(uwf.finished_cnt, 0) * 24.0
                 + COALESCE(uwf.apply_cnt, 0) * 12.0
                 + COALESCE(uwf.view_cnt, 0) * 0.5
+                + COALESCE(uf.apply_cnt, 0) * 1.0
+                    / MAX(1, COALESCE(uf.view_cnt, 0) + COALESCE(uf.apply_cnt, 0)) * 5.0
+                + COALESCE(utf.apply_cnt, 0) * 1.0
+                    / MAX(1, COALESCE(utf.view_cnt, 0) + COALESCE(utf.apply_cnt, 0)) * 15.0
+                + COALESCE(uef.apply_cnt, 0) * 1.0
+                    / MAX(1, COALESCE(uef.view_cnt, 0) + COALESCE(uef.apply_cnt, 0)) * 18.0
+                + COALESCE(uwf.apply_cnt, 0) * 1.0
+                    / MAX(1, COALESCE(uwf.view_cnt, 0) + COALESCE(uwf.apply_cnt, 0)) * 20.0
+                - MAX(0, COALESCE(utf.view_cnt, 0) - COALESCE(utf.apply_cnt, 0)) * 1.0
+                    / MAX(1, COALESCE(utf.view_cnt, 0) + COALESCE(utf.apply_cnt, 0)) * 4.0
+                - MAX(0, COALESCE(uef.view_cnt, 0) - COALESCE(uef.apply_cnt, 0)) * 1.0
+                    / MAX(1, COALESCE(uef.view_cnt, 0) + COALESCE(uef.apply_cnt, 0)) * 5.0
+                - MAX(0, COALESCE(uwf.view_cnt, 0) - COALESCE(uwf.apply_cnt, 0)) * 1.0
+                    / MAX(1, COALESCE(uwf.view_cnt, 0) + COALESCE(uwf.apply_cnt, 0)) * 6.0
                 - MIN(20.0, CASE
                     WHEN uf.avg_reward_per_hour IS NULL THEN 0.0
                     WHEN s.hours > 0 THEN ABS(uf.avg_reward_per_hour - (s.reward / s.hours))
@@ -320,7 +372,9 @@ class Repository:
                 normalized_rule_score = (
                     float(row["rule_score"]) - min_rule_score
                 ) / rule_score_range
-                row["ml_score"] = (0.75 * normalized_rule_score) + (0.25 * model_score)
+                row["ml_score"] = (
+                    (1.0 - self.ml_reranker_weight) * normalized_rule_score
+                ) + (self.ml_reranker_weight * model_score)
             rows = sorted(
                 rows,
                 key=lambda row: (
@@ -361,17 +415,49 @@ class Repository:
             COALESCE(uf.view_cnt, 0) AS view_cnt,
             COALESCE(uf.apply_cnt, 0) AS apply_cnt,
             COALESCE(uf.finished_cnt, 0) AS finished_cnt,
+            COALESCE(uf.apply_cnt, 0) * 1.0
+                / MAX(1, COALESCE(uf.view_cnt, 0) + COALESCE(uf.apply_cnt, 0))
+                AS user_apply_rate,
+            COALESCE(uf.finished_cnt, 0) * 1.0 / MAX(1, COALESCE(uf.apply_cnt, 0))
+                AS user_finish_rate,
+            MAX(0, COALESCE(uf.view_cnt, 0) - COALESCE(uf.apply_cnt, 0)) * 1.0
+                / MAX(1, COALESCE(uf.view_cnt, 0) + COALESCE(uf.apply_cnt, 0))
+                AS user_view_without_apply_rate,
             COALESCE(uf.user_cancel_cnt, 0) AS user_cancel_cnt,
             COALESCE(uf.system_cancel_cnt, 0) AS system_cancel_cnt,
             COALESCE(utf.view_cnt, 0) AS task_view_cnt,
             COALESCE(utf.apply_cnt, 0) AS task_apply_cnt,
             COALESCE(utf.finished_cnt, 0) AS task_finished_cnt,
+            COALESCE(utf.apply_cnt, 0) * 1.0
+                / MAX(1, COALESCE(utf.view_cnt, 0) + COALESCE(utf.apply_cnt, 0))
+                AS task_apply_rate,
+            COALESCE(utf.finished_cnt, 0) * 1.0 / MAX(1, COALESCE(utf.apply_cnt, 0))
+                AS task_finish_rate,
+            MAX(0, COALESCE(utf.view_cnt, 0) - COALESCE(utf.apply_cnt, 0)) * 1.0
+                / MAX(1, COALESCE(utf.view_cnt, 0) + COALESCE(utf.apply_cnt, 0))
+                AS task_view_without_apply_rate,
             COALESCE(uef.view_cnt, 0) AS employer_view_cnt,
             COALESCE(uef.apply_cnt, 0) AS employer_apply_cnt,
             COALESCE(uef.finished_cnt, 0) AS employer_finished_cnt,
+            COALESCE(uef.apply_cnt, 0) * 1.0
+                / MAX(1, COALESCE(uef.view_cnt, 0) + COALESCE(uef.apply_cnt, 0))
+                AS employer_apply_rate,
+            COALESCE(uef.finished_cnt, 0) * 1.0 / MAX(1, COALESCE(uef.apply_cnt, 0))
+                AS employer_finish_rate,
+            MAX(0, COALESCE(uef.view_cnt, 0) - COALESCE(uef.apply_cnt, 0)) * 1.0
+                / MAX(1, COALESCE(uef.view_cnt, 0) + COALESCE(uef.apply_cnt, 0))
+                AS employer_view_without_apply_rate,
             COALESCE(uwf.view_cnt, 0) AS workplace_view_cnt,
             COALESCE(uwf.apply_cnt, 0) AS workplace_apply_cnt,
             COALESCE(uwf.finished_cnt, 0) AS workplace_finished_cnt,
+            COALESCE(uwf.apply_cnt, 0) * 1.0
+                / MAX(1, COALESCE(uwf.view_cnt, 0) + COALESCE(uwf.apply_cnt, 0))
+                AS workplace_apply_rate,
+            COALESCE(uwf.finished_cnt, 0) * 1.0 / MAX(1, COALESCE(uwf.apply_cnt, 0))
+                AS workplace_finish_rate,
+            MAX(0, COALESCE(uwf.view_cnt, 0) - COALESCE(uwf.apply_cnt, 0)) * 1.0
+                / MAX(1, COALESCE(uwf.view_cnt, 0) + COALESCE(uwf.apply_cnt, 0))
+                AS workplace_view_without_apply_rate,
             (
                 CASE WHEN u.location_id = ? THEN 30.0 ELSE 0.0 END
                 + CASE WHEN u.has_mk = 1 THEN 8.0 ELSE 0.0 END
@@ -390,6 +476,20 @@ class Repository:
                 + COALESCE(uwf.finished_cnt, 0) * 24.0
                 + COALESCE(uwf.apply_cnt, 0) * 12.0
                 + COALESCE(uwf.view_cnt, 0) * 0.5
+                + COALESCE(uf.apply_cnt, 0) * 1.0
+                    / MAX(1, COALESCE(uf.view_cnt, 0) + COALESCE(uf.apply_cnt, 0)) * 5.0
+                + COALESCE(utf.apply_cnt, 0) * 1.0
+                    / MAX(1, COALESCE(utf.view_cnt, 0) + COALESCE(utf.apply_cnt, 0)) * 15.0
+                + COALESCE(uef.apply_cnt, 0) * 1.0
+                    / MAX(1, COALESCE(uef.view_cnt, 0) + COALESCE(uef.apply_cnt, 0)) * 18.0
+                + COALESCE(uwf.apply_cnt, 0) * 1.0
+                    / MAX(1, COALESCE(uwf.view_cnt, 0) + COALESCE(uwf.apply_cnt, 0)) * 20.0
+                - MAX(0, COALESCE(utf.view_cnt, 0) - COALESCE(utf.apply_cnt, 0)) * 1.0
+                    / MAX(1, COALESCE(utf.view_cnt, 0) + COALESCE(utf.apply_cnt, 0)) * 4.0
+                - MAX(0, COALESCE(uef.view_cnt, 0) - COALESCE(uef.apply_cnt, 0)) * 1.0
+                    / MAX(1, COALESCE(uef.view_cnt, 0) + COALESCE(uef.apply_cnt, 0)) * 5.0
+                - MAX(0, COALESCE(uwf.view_cnt, 0) - COALESCE(uwf.apply_cnt, 0)) * 1.0
+                    / MAX(1, COALESCE(uwf.view_cnt, 0) + COALESCE(uwf.apply_cnt, 0)) * 6.0
                 - CASE
                     WHEN uf.avg_reward_per_hour IS NULL THEN 0.0
                     ELSE MIN(20.0, ABS(uf.avg_reward_per_hour - ?)) * 0.05

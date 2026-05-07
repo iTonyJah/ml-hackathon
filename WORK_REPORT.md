@@ -1107,3 +1107,119 @@ delta_vs_current: -0.203297
 Практический вывод для следующих экспериментов: не менять evaluator, но оптимизировать выдачу так,
 чтобы true `APPLY` пользователи поднимались как можно выше во всем TOP-10, а не только внутри первых
 `capacity` позиций.
+
+## 20. Эксперименты для роста предполагаемой TOP-10 ROC-AUC@0.1
+
+После появления notebook была поставлена рабочая цель: увеличить предполагаемую метрику
+`TOP-10 ROC-AUC@max_fpr=0.1` примерно на `+0.1`.
+
+### 20.1. Добавленные runtime-параметры
+
+Чтобы быстрее проводить ablation без изменения кода между запусками, добавлены runtime-параметры:
+
+```text
+ML_RERANKER_WEIGHT
+CANDIDATE_POOL_LIMIT
+```
+
+Поведение:
+
+- `ML_RERANKER_WEIGHT` управляет blend-формулой между normalized rule score и model probability;
+- `CANDIDATE_POOL_LIMIT` управляет размером пула, который извлекается перед финальным TOP-10 rerank;
+- после проверки ratio-признаков дефолты переведены на лучший из проверенных режимов:
+  `ML_RERANKER_WEIGHT=0.5`, `CANDIDATE_POOL_LIMIT=1000`.
+
+### 20.2. Результаты ablation
+
+Базовый результат из notebook:
+
+```text
+current local evaluator: 0.957852
+possible TOP-10 ROC-AUC@0.1: 0.754555
+positive candidates in TOP-10: 96
+```
+
+Эксперимент `ML_RERANKER_WEIGHT=0.5`, `CANDIDATE_POOL_LIMIT=500`:
+
+```text
+current local evaluator: 0.925470
+possible TOP-10 ROC-AUC@0.1: 0.775135
+delta possible: +0.020580
+positive candidates in TOP-10: 123
+```
+
+Эксперимент `ML_RERANKER_WEIGHT=0.75`, `CANDIDATE_POOL_LIMIT=1000`:
+
+```text
+current local evaluator: 0.682671
+possible TOP-10 ROC-AUC@0.1: 0.636049
+delta possible: -0.118506
+positive candidates in TOP-10: 133
+```
+
+Эксперимент `ML_RERANKER_WEIGHT=0.5`, `CANDIDATE_POOL_LIMIT=1000`:
+
+```text
+current local evaluator: 0.939715
+possible TOP-10 ROC-AUC@0.1: 0.777384
+delta possible: +0.022829
+positive candidates in TOP-10: 122
+```
+
+Эксперимент с ratio-признаками `ML_RERANKER_WEIGHT=0.5`, `CANDIDATE_POOL_LIMIT=1000`:
+
+```text
+current local evaluator: 0.924501
+possible TOP-10 ROC-AUC@0.1: 0.815874
+delta possible vs baseline: +0.061319
+positive candidates in TOP-10: 103
+evaluated TOP-10 shifts: 86
+```
+
+Контрольный эксперимент с ratio-признаками `ML_RERANKER_WEIGHT=0.4`, `CANDIDATE_POOL_LIMIT=1000`:
+
+```text
+current local evaluator: 0.926512
+possible TOP-10 ROC-AUC@0.1: 0.800326
+delta possible vs baseline: +0.045771
+positive candidates in TOP-10: 101
+evaluated TOP-10 shifts: 85
+```
+
+### 20.3. Диагностика
+
+На текущем local split у actual `APPLY` пользователей из `data/validation/apply.csv`:
+
+```text
+labels: 215
+unique users: 81
+location_match: 0.0
+mk_ok: 1.0
+has_entity_history: 0.860465
+```
+
+Это означает, что простое усиление location-сигнала не помогает для предполагаемой TOP-10 метрики.
+Был проверен вариант с уменьшенным location boost, но в дефолтном режиме он не изменил итоговую
+метрику:
+
+```text
+possible TOP-10 ROC-AUC@0.1: 0.754555
+```
+
+Также был проверен recency boost по последней активности пользователя. В дефолтной конфигурации он
+не дал прироста и был исключен из финального изменения, чтобы не оставлять сложность без эффекта.
+
+### 20.4. Вывод
+
+Один только вес ML reranker не дает целевой прирост `+0.1`: лучший вариант до новых признаков дал
+около `+0.023`. Добавление ratio-признаков подняло проверенный прирост до `+0.061`, но до целевого
+`+0.1` все еще остается зазор около `0.039`.
+
+Следующий перспективный шаг — улучшать не blend, а признаки и candidate recall:
+
+- развить ratio-признаки через сглаживание по глобальным средним для редких `task_type`, `employer_id`,
+  `workplace_id`;
+- добавить отдельные penalty/boost для пользователей с большим количеством views без apply;
+- проверить признаки по дневным/недельным циклам активности пользователя;
+- отдельно оптимизировать группы `capacity=1`, потому что именно они почти не видны локальному
+  evaluator, но оцениваются в TOP-10 ROC-AUC@0.1.

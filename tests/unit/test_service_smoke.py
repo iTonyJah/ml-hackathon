@@ -27,6 +27,17 @@ def build_service_without_ml(tmp_path: Path) -> HackatonRpcService:
     return HackatonRpcService(repository=repository, prepare=prepare)
 
 
+def test_repository_clamps_ml_reranker_weight(tmp_path: Path) -> None:
+    db_path = str(tmp_path / "test.db")
+    asyncio.run(init_db_for(db_path))
+
+    low_weight_repository = Repository(db_path=db_path, ml_reranker_weight=-1.0)
+    high_weight_repository = Repository(db_path=db_path, ml_reranker_weight=2.0)
+
+    assert low_weight_repository.ml_reranker_weight == 0.0
+    assert high_weight_repository.ml_reranker_weight == 1.0
+
+
 async def wait_until_ready(service: HackatonRpcService) -> None:
     for _ in range(50):
         ready_response = await service.ready(None)

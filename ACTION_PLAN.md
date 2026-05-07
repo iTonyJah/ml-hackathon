@@ -53,4 +53,9 @@ Main growth area: offline training exists, but online inference is still almost 
 - `hackaton/train/training.py` still uses `LogisticRegression`.
 - `hackaton/service/repositories.py` now has prepare-time aggregate rebuild and scored candidate selection.
 - `hackaton/service/prepare_manager.py` can run async prepare callbacks and is wired to rebuild online features.
-- Online inference is still rule-based, but it now uses event-history aggregates instead of only `location_id` and `has_mk`.
+- Online inference now uses rule score plus ML reranker, expanded candidate pool, and ratio features for
+  `APPLY/VIEW` and `FINISHED/APPLY` history by user, task, employer, and workplace.
+- Best checked configuration for the presumed TOP-10 ROC-AUC@0.1 path is now the default:
+  `ML_RERANKER_WEIGHT=0.5`, `CANDIDATE_POOL_LIMIT=1000`.
+- Latest checked presumed TOP-10 ROC-AUC@0.1 on the local validation split: `0.815874`
+  (`+0.061319` vs notebook baseline `0.754555`).

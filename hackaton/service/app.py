@@ -21,9 +21,15 @@ LOGGER = logging.getLogger(__name__)
 
 
 class HackatonRpcService:
-    def __init__(self, repository: Repository, prepare: PrepareManager) -> None:
+    def __init__(
+        self,
+        repository: Repository,
+        prepare: PrepareManager,
+        candidate_pool_limit: int = 200,
+    ) -> None:
         self.repository = repository
         self.prepare_manager = prepare
+        self.candidate_pool_limit = max(10, int(candidate_pool_limit))
 
     async def user(self, payload: dict) -> dict:
         REQUEST_COUNT.labels("user").inc()
@@ -95,7 +101,7 @@ class HackatonRpcService:
             except ValidationError as exc:
                 return {"user_ids": [], "status_code": 422, "detail": str(exc)}
 
-            candidate_pool_limit = max(request.limit, 200)
+            candidate_pool_limit = max(request.limit, self.candidate_pool_limit)
             candidates = await self.repository.find_scored_candidates(
                 shift=request.shift,
                 limit=candidate_pool_limit,
