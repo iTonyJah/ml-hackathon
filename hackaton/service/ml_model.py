@@ -321,27 +321,38 @@ class MLModel:
         sys_cancel_ids = set(
             events[events["interaction"] == "SYSTEM_CANCEL"]["shift_id"].astype(str)
         )
-        applies = (
-            events[
-                (events["interaction"] == "APPLY")
-                & (~events["shift_id"].astype(str).isin(sys_cancel_ids))
-            ][["user_id", "shift_id"]]
-            .drop_duplicates()
-            .copy()
-        )
+
+        # shift_id -> start_at for filtering post-start APPLY events
+        shift_start_map: dict[str, pd.Timestamp] = {}
+        if "start_at" in shifts.columns:
+            starts = pd.to_datetime(shifts["start_at"], utc=True, errors="coerce")
+            shift_start_map = dict(zip(shifts["id"].astype(str), starts))
+
+        # Positives: APPLY before shift.start_at, excluding SYSTEM_CANCEL shifts
+        apply_events = events[
+            (events["interaction"] == "APPLY")
+            & (~events["shift_id"].astype(str).isin(sys_cancel_ids))
+        ].copy()
+        if "ts" in apply_events.columns and shift_start_map:
+            ts_parsed = pd.to_datetime(apply_events["ts"], utc=True, errors="coerce")
+            shift_start = apply_events["shift_id"].astype(str).map(shift_start_map)
+            apply_events = apply_events[
+                shift_start.isna() | ts_parsed.isna() | (ts_parsed <= shift_start)
+            ]
+
+        applies = apply_events[["user_id", "shift_id"]].drop_duplicates().copy()
         applies["label"] = 1
 
-        views = (
-            events[events["interaction"] == "VIEW"][["user_id", "shift_id"]]
-            .drop_duplicates()
-            .copy()
-        )
-
         apply_pairs = set(zip(applies["user_id"].astype(str), applies["shift_id"].astype(str)))
-        views["has_apply"] = views.apply(
+
+        # Negatives: VIEW and USER_CANCEL without subsequent APPLY (per requirements)
+        neg_events = events[events["interaction"].isin(["VIEW", "USER_CANCEL"])][
+            ["user_id", "shift_id"]
+        ].drop_duplicates().copy()
+        neg_events["has_apply"] = neg_events.apply(
             lambda r: (str(r["user_id"]), str(r["shift_id"])) in apply_pairs, axis=1
         )
-        negatives = views[~views["has_apply"]][["user_id", "shift_id"]].copy()
+        negatives = neg_events[~neg_events["has_apply"]][["user_id", "shift_id"]].copy()
         negatives["label"] = 0
         negatives = negatives.sample(n=min(len(negatives), len(applies) * 5), random_state=42)
 

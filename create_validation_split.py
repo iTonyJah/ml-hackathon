@@ -1,6 +1,9 @@
 """
 Скрипт создания валидационного сплита из тренировочных данных.
-Разбивает данные по времени: train до 15 февраля, val — последние 2 недели февраля.
+
+Разбиение по времени (требование хакатона):
+  train: смены с start_at <= T_split
+  test:  смены с start_at в интервале (T_split, T_train]
 
 Запуск:
     poetry run python create_validation_split.py
@@ -16,8 +19,10 @@ DATA_DIR = BASE_DIR / "data"
 TRAIN_DIR = DATA_DIR / "train"
 VAL_DIR = DATA_DIR / "validation"
 
-SPLIT_DATE = pd.Timestamp("2026-02-15", tz="UTC")
-SPLIT_DATE_PLAIN = datetime.date(2026, 2, 15)  # для сравнения с date() объектами
+# Финальная оценка — на последних 1-2 неделях.
+# Данные заканчиваются ~2026-02-28, берём последние 2 недели как val.
+SPLIT_DATE = pd.Timestamp("2026-02-14", tz="UTC")
+SPLIT_DATE_PLAIN = datetime.date(2026, 2, 14)
 
 
 def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -40,28 +45,34 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
 
 def split_shifts(shifts: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    train_shifts = shifts[shifts["start_at"] < SPLIT_DATE].copy()
-    val_shifts = shifts[shifts["start_at"] >= SPLIT_DATE].copy()
+    # train: start_at <= T_split
+    # val:   start_at >  T_split (т.е. в интервале (T_split, T_train])
+    train_shifts = shifts[shifts["start_at"] <= SPLIT_DATE].copy()
+    val_shifts = shifts[shifts["start_at"] > SPLIT_DATE].copy()
     print(f"\nДата разбиения: {SPLIT_DATE.date()}")
-    print(f"  Train shifts: {len(train_shifts):,}")
-    print(f"  Val shifts:   {len(val_shifts):,}")
+    print(f"  Train shifts: {len(train_shifts):,}  (до {SPLIT_DATE.date()} включительно)")
+    print(
+        f"  Val shifts:   {len(val_shifts):,}  "
+        f"({val_shifts['start_at'].min().date()} -> {val_shifts['start_at'].max().date()})"
+    )
     return train_shifts, val_shifts
 
 
 def split_events(
     events: pd.DataFrame,
-    train_shifts: pd.DataFrame,
     val_shifts: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    # Train events — все события строго до даты разбиения (нет утечки из будущего)
+    train_events = events[events["ts"] <= SPLIT_DATE].copy()
+
+    # Val events — все события в валидационном периоде (по времени, не по shift_id).
+    # Evaluator загружает их день за днём в incremental prepare.
     val_shift_ids = set(val_shifts["id"].astype(str))
+    val_events = events[
+        (events["ts"] > SPLIT_DATE) & (events["shift_id"].astype(str).isin(val_shift_ids))
+    ].copy()
 
-    # Train events — все события строго до даты разбиения (без утечки)
-    train_events = events[events["ts"] < SPLIT_DATE].copy()
-
-    # Val events — события по валидационным сменам
-    val_events = events[events["shift_id"].astype(str).isin(val_shift_ids)].copy()
-
-    print("События:")
+    print("\nСобытия:")
     print(f"  Train events: {len(train_events):,}")
     print(f"  Val events:   {len(val_events):,}")
     return train_events, val_events
@@ -69,12 +80,13 @@ def split_events(
 
 def build_apply(events: pd.DataFrame, val_shifts: pd.DataFrame) -> pd.DataFrame:
     """
-    apply.csv — факт записи пользователя на смену (y=1).
-    Правила:
-    - Только смены из валидационного периода (start_at >= SPLIT_DATE)
-    - Только события APPLY после даты разбиения (ts >= SPLIT_DATE)
+    apply.csv — ground truth: пользователь реально подал заявку на смену.
+
+    Правила (требования хакатона):
+    - Только смены из val-периода (start_at > T_split)
+    - Только события APPLY, произошедшие ДО start_at смены (нет утечки из будущего)
     - Исключаем смены с SYSTEM_CANCEL
-    - Колонки: user_id, shift_id, date  <-- evaluator ожидает именно 'date'
+    - Колонка date = shift.start_at.date() (не ts события!)
     """
     val_shift_ids = set(val_shifts["id"].astype(str))
 
@@ -82,29 +94,93 @@ def build_apply(events: pd.DataFrame, val_shifts: pd.DataFrame) -> pd.DataFrame:
         events[events["interaction"] == "SYSTEM_CANCEL"]["shift_id"].astype(str)
     )
 
-    apply = (
-        events[
-            (events["interaction"] == "APPLY")
-            & (events["shift_id"].astype(str).isin(val_shift_ids))
-            & (~events["shift_id"].astype(str).isin(sys_cancel_shift_ids))
-            & (events["ts"] >= SPLIT_DATE)
-        ][["user_id", "shift_id", "ts"]]
-        .drop_duplicates(subset=["user_id", "shift_id"])
-        .copy()
-    )
+    # Словарь shift_id -> start_at для быстрого lookup
+    shift_start = val_shifts.set_index(val_shifts["id"].astype(str))["start_at"]
 
-    # Evaluator ожидает колонку 'date', не 'ts'
-    apply["date"] = apply["ts"].dt.date
-    apply = apply[["user_id", "shift_id", "date"]]
+    apply_raw = events[
+        (events["interaction"] == "APPLY")
+        & (events["shift_id"].astype(str).isin(val_shift_ids))
+        & (~events["shift_id"].astype(str).isin(sys_cancel_shift_ids))
+    ][["user_id", "shift_id", "ts"]].copy()
 
-    print("apply.csv:")
-    print(f"  Записей APPLY (val, без SYSTEM_CANCEL): {len(apply):,}")
+    apply_raw["shift_id_str"] = apply_raw["shift_id"].astype(str)
+    apply_raw["shift_start_at"] = apply_raw["shift_id_str"].map(shift_start)
+
+    # Исключаем APPLY, произошедшие ПОСЛЕ начала смены (утечка из будущего)
+    apply_raw = apply_raw[apply_raw["ts"] <= apply_raw["shift_start_at"]].copy()
+
+    apply_raw = apply_raw.drop_duplicates(subset=["user_id", "shift_id"])
+
+    # date = shift.start_at.date() — требование evaluator и хакатона
+    apply_raw["date"] = apply_raw["shift_start_at"].dt.date
+    apply = apply_raw[["user_id", "shift_id", "date"]].copy()
+
+    print("\napply.csv:")
+    print(f"  Записей APPLY (val, без SYSTEM_CANCEL, без утечек): {len(apply):,}")
     print(f"  Уникальных пользователей: {apply['user_id'].nunique():,}")
     print(f"  Уникальных смен:          {apply['shift_id'].nunique():,}")
     print(f"  Диапазон дат: {apply['date'].min()} -> {apply['date'].max()}")
-    print(f"  Колонки: {apply.columns.tolist()}")
-    print(f"  Пример:{apply.head(3).to_string(index=False)}")
+    print(f"  Пример:\n{apply.head(3).to_string(index=False)}")
     return apply
+
+
+def validate_split(
+    apply: pd.DataFrame,
+    val_shifts: pd.DataFrame,
+    train_events: pd.DataFrame,
+    events: pd.DataFrame,
+) -> None:
+    print("\nПроверка корректности сплита:")
+
+    # Все даты в apply >= минимальной даты val_shifts (граница — по времени, не по дате)
+    val_min_date = val_shifts["start_at"].min().date()
+    val_max_date = val_shifts["start_at"].max().date()
+    bad_dates = [d for d in apply["date"] if d < val_min_date]
+    if bad_dates:
+        print(f"  [ОШИБКА] apply.csv содержит {len(bad_dates)} записей до {val_min_date}!")
+    else:
+        print(f"  [OK] Все даты в apply.csv в диапазоне [{val_min_date}, {val_max_date}]")
+
+    # date совпадает с shift.start_at.date()
+    shift_start_map = {
+        str(r["id"]): r["start_at"].date() for _, r in val_shifts.iterrows()
+    }
+    wrong_dates = [
+        (r["shift_id"], r["date"], shift_start_map.get(str(r["shift_id"])))
+        for _, r in apply.iterrows()
+        if r["date"] != shift_start_map.get(str(r["shift_id"]))
+    ]
+    if wrong_dates:
+        print(f"  [ОШИБКА] {len(wrong_dates)} записей с date != shift.start_at.date():")
+        for sid, got, expected in wrong_dates[:3]:
+            print(f"    shift_id={sid}: date={got}, start_at.date()={expected}")
+    else:
+        print("  [OK] Все date в apply.csv == shift.start_at.date()")
+
+    # Нет apply-событий после start_at смены
+    apply_events = events[events["interaction"] == "APPLY"].copy()
+    apply_events["shift_id_str"] = apply_events["shift_id"].astype(str)
+    shift_start_ts_map = val_shifts.set_index(val_shifts["id"].astype(str))["start_at"]
+    apply_events["shift_start"] = apply_events["shift_id_str"].map(shift_start_ts_map)
+    future_applies = apply_events.dropna(subset=["shift_start"])
+    future_applies = future_applies[future_applies["ts"] > future_applies["shift_start"]]
+    val_future = future_applies[
+        future_applies["shift_id_str"].isin(set(val_shifts["id"].astype(str)))
+    ]
+    print(
+        f"  [OK] APPLY-событий после start_at смены (исключены из apply.csv): {len(val_future):,}"
+    )
+
+    # Нет утечек из будущего в train_events
+    future_in_train = train_events[train_events["ts"] > SPLIT_DATE]
+    if len(future_in_train) > 0:
+        print(f"  [ОШИБКА] train_events содержит {len(future_in_train)} событий после split_date!")
+    else:
+        print("  [OK] Train events не содержат утечек из будущего")
+
+    # Пересечение shift_id
+    common = set(apply["shift_id"].astype(str)) & set(val_shifts["id"].astype(str))
+    print(f"  [OK] Совпадающих shift_id в apply и val_shifts: {len(common)}")
 
 
 def save_files(
@@ -125,7 +201,7 @@ def save_files(
     apply.to_csv(VAL_DIR / "apply.csv", index=False)
     users.to_csv(VAL_DIR / "users.csv", index=False)
 
-    print("Файлы сохранены:")
+    print("\nФайлы сохранены:")
     for path in [
         TRAIN_DIR / "shift_train.csv",
         TRAIN_DIR / "event_train.csv",
@@ -138,42 +214,16 @@ def save_files(
         print(f"  {path.relative_to(BASE_DIR)}  ({size_kb:.1f} KB)")
 
 
-def validate_split(
-    apply: pd.DataFrame,
-    val_shifts: pd.DataFrame,
-    train_events: pd.DataFrame,
-) -> None:
-    print("\nПроверка корректности сплита:")
-
-    # apply['date'] — python date объекты, сравниваем с datetime.date
-    bad_dates = [d for d in apply["date"] if d < SPLIT_DATE_PLAIN]
-    if bad_dates:
-        print(f"  [ОШИБКА] apply.csv содержит {len(bad_dates)} записей до split_date!")
-    else:
-        print(f"  [OK] Все даты в apply.csv >= {SPLIT_DATE_PLAIN}")
-
-    # Пересечение shift_id между apply и val_shifts
-    common = set(apply["shift_id"].astype(str)) & set(val_shifts["id"].astype(str))
-    print(f"  [OK] Совпадающих shift_id в apply и val_shifts: {len(common)}")
-
-    # Утечки из будущего в train_events
-    future_events = train_events[train_events["ts"] >= SPLIT_DATE]
-    if len(future_events) > 0:
-        print(f"  [ОШИБКА] train_events содержит {len(future_events)} событий после split_date!")
-    else:
-        print("  [OK] Train events не содержат утечек из будущего")
-
-
 def main() -> None:
-    print("=" * 55)
-    print("  Создание валидационного сплита")
-    print("=" * 55)
+    print("=" * 60)
+    print("  Создание валидационного сплита (time-based)")
+    print("=" * 60)
 
     shifts, events, users = load_data()
     train_shifts, val_shifts = split_shifts(shifts)
-    train_events, val_events = split_events(events, train_shifts, val_shifts)
+    train_events, val_events = split_events(events, val_shifts)
     apply = build_apply(events, val_shifts)
-    validate_split(apply, val_shifts, train_events)
+    validate_split(apply, val_shifts, train_events, events)
     save_files(train_shifts, train_events, val_shifts, val_events, apply, users)
 
 
