@@ -372,9 +372,9 @@ class Repository:
                 normalized_rule_score = (
                     float(row["rule_score"]) - min_rule_score
                 ) / rule_score_range
-                row["ml_score"] = (
-                    (1.0 - self.ml_reranker_weight) * normalized_rule_score
-                ) + (self.ml_reranker_weight * model_score)
+                row["ml_score"] = ((1.0 - self.ml_reranker_weight) * normalized_rule_score) + (
+                    self.ml_reranker_weight * model_score
+                )
             rows = sorted(
                 rows,
                 key=lambda row: (
