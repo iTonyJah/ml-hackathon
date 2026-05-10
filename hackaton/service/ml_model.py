@@ -346,9 +346,11 @@ class MLModel:
         apply_pairs = set(zip(applies["user_id"].astype(str), applies["shift_id"].astype(str)))
 
         # Negatives: VIEW and USER_CANCEL without subsequent APPLY (per requirements)
-        neg_events = events[events["interaction"].isin(["VIEW", "USER_CANCEL"])][
-            ["user_id", "shift_id"]
-        ].drop_duplicates().copy()
+        neg_events = (
+            events[events["interaction"].isin(["VIEW", "USER_CANCEL"])][["user_id", "shift_id"]]
+            .drop_duplicates()
+            .copy()
+        )
         neg_events["has_apply"] = neg_events.apply(
             lambda r: (str(r["user_id"]), str(r["shift_id"])) in apply_pairs, axis=1
         )
