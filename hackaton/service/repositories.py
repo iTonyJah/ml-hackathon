@@ -603,9 +603,9 @@ class Repository:
                 + COALESCE(uf.view_cnt, 0) * 0.15
                 - COALESCE(uf.user_cancel_cnt, 0) * 1.5
                 - COALESCE(uf.system_cancel_cnt, 0) * 0.5
-                + COALESCE(uf.active_days, 0) * 0.125
+                + COALESCE(uf.active_days, 0) * 0.1875
                 - COALESCE(uf.user_cancel_cnt, 0) * 1.0
-                    / MAX(1, COALESCE(uf.apply_cnt, 0)) * 4.0
+                    / MAX(1, COALESCE(uf.apply_cnt, 0)) * 6.0
                 + COALESCE(utf.finished_cnt, 0) * 12.0
                 + COALESCE(utf.apply_cnt, 0) * 7.0
                 + COALESCE(utf.view_cnt, 0) * 0.5
@@ -615,27 +615,27 @@ class Repository:
                 + COALESCE(uwf.finished_cnt, 0) * 24.0
                 + COALESCE(uwf.apply_cnt, 0) * 12.0
                 + COALESCE(uwf.view_cnt, 0) * 0.5
-                + COALESCE(ulf.finished_cnt, 0) * 5.0
-                + COALESCE(ulf.apply_cnt, 0) * 3.0
-                + COALESCE(ef.avg_fill_rate, 0.0) * 3.0
-                + COALESCE(usf.finished_cnt, 0) * 11.0
-                + COALESCE(usf.apply_cnt, 0) * 7.0
-                - COALESCE(usf.cancel_cnt, 0) * 5.0
+                + COALESCE(ulf.finished_cnt, 0) * 7.5
+                + COALESCE(ulf.apply_cnt, 0) * 4.5
+                + COALESCE(ef.avg_fill_rate, 0.0) * 4.5
+                + COALESCE(usf.finished_cnt, 0) * 16.5
+                + COALESCE(usf.apply_cnt, 0) * 10.5
+                - COALESCE(usf.cancel_cnt, 0) * 7.5
                 + CASE
                     WHEN usf.last_apply_ts IS NULL THEN 0.0
-                    WHEN julianday(:target_start_at) - julianday(usf.last_apply_ts) <= 14 THEN 5.0
-                    WHEN julianday(:target_start_at) - julianday(usf.last_apply_ts) <= 35 THEN 3.0
-                    WHEN julianday(:target_start_at) - julianday(usf.last_apply_ts) <= 70 THEN 1.4
+                    WHEN julianday(:target_start_at) - julianday(usf.last_apply_ts) <= 14 THEN 7.5
+                    WHEN julianday(:target_start_at) - julianday(usf.last_apply_ts) <= 35 THEN 4.5
+                    WHEN julianday(:target_start_at) - julianday(usf.last_apply_ts) <= 70 THEN 2.1
                     ELSE 0.0
                   END
-                + COALESCE(ursf.finished_cnt, 0) * 9.0
-                + COALESCE(ursf.apply_cnt, 0) * 6.0
-                - COALESCE(ursf.cancel_cnt, 0) * 4.0
+                + COALESCE(ursf.finished_cnt, 0) * 13.5
+                + COALESCE(ursf.apply_cnt, 0) * 9.0
+                - COALESCE(ursf.cancel_cnt, 0) * 6.0
                 + CASE
                     WHEN ursf.last_apply_ts IS NULL THEN 0.0
-                    WHEN julianday(:target_start_at) - julianday(ursf.last_apply_ts) <= 14 THEN 4.0
-                    WHEN julianday(:target_start_at) - julianday(ursf.last_apply_ts) <= 35 THEN 2.4
-                    WHEN julianday(:target_start_at) - julianday(ursf.last_apply_ts) <= 70 THEN 1.2
+                    WHEN julianday(:target_start_at) - julianday(ursf.last_apply_ts) <= 14 THEN 6.0
+                    WHEN julianday(:target_start_at) - julianday(ursf.last_apply_ts) <= 35 THEN 3.6
+                    WHEN julianday(:target_start_at) - julianday(ursf.last_apply_ts) <= 70 THEN 1.8
                     ELSE 0.0
                   END
                 + COALESCE(uf.apply_cnt, 0) * 1.0

@@ -1302,3 +1302,46 @@ prepare_duration_avg_sec: 9.3
 make test: passed
 make precommit: passed
 ```
+
+### 21.4. Дополнительная настройка весов
+
+После итогового eval был проведен более плотный grid-search весов для уже добавленных context и
+recurring компонентов `rule_score`.
+
+Лучшая no-RPC комбинация:
+
+```text
+context_scale: 0.75
+recurring_scale: 0.3
+target_metric: 0.7178592257286235
+evaluated_groups: 48
+evaluated_shifts: 87
+```
+
+Эти веса были перенесены в `rule_score`, после чего выполнен полный RPC-eval.
+
+Артефакт: `artifacts/new_eval_weight_tuned_rpm200/eval_report.md`.
+
+```text
+overall_target_metric: 0.7171094834916615
+days_evaluated: 14
+stop_reason: completed
+predict_rpm: 200.017
+predict_latency_p50_ms: 115.588
+predict_latency_p80_ms: 122.252
+predict_latency_p95_ms: 133.720
+prepare_duration_avg_sec: 8.7
+```
+
+Прирост относительно предыдущего feature engineering eval: `+0.008471` абсолютных пункта,
+около `+1.2%`.
+
+Прирост относительно первого ML-прогона на новом датасете: `+0.052296` абсолютных пункта,
+около `+7.9%`.
+
+Проверки:
+
+```text
+make test: passed
+make precommit: passed
+```
