@@ -120,6 +120,24 @@ CREATE TABLE IF NOT EXISTS employer_features (
     capacity_sum INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS user_hour_features (
+    user_id TEXT NOT NULL,
+    shift_hour INTEGER NOT NULL,
+    view_cnt INTEGER NOT NULL DEFAULT 0,
+    apply_cnt INTEGER NOT NULL DEFAULT 0,
+    finished_cnt INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, shift_hour)
+);
+
+CREATE TABLE IF NOT EXISTS user_dayofweek_features (
+    user_id TEXT NOT NULL,
+    shift_dayofweek INTEGER NOT NULL,
+    view_cnt INTEGER NOT NULL DEFAULT 0,
+    apply_cnt INTEGER NOT NULL DEFAULT 0,
+    finished_cnt INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, shift_dayofweek)
+);
+
 CREATE INDEX IF NOT EXISTS idx_events_shift_id ON events(shift_id);
 CREATE INDEX IF NOT EXISTS idx_events_user_id ON events(user_id);
 CREATE INDEX IF NOT EXISTS idx_shifts_location_id ON shifts(location_id);
@@ -138,6 +156,10 @@ CREATE INDEX IF NOT EXISTS idx_user_recurring_shift_features_lookup
         location_id, task_type, employer_id, workplace_id,
         shift_hour, shift_dayofweek
     );
+CREATE INDEX IF NOT EXISTS idx_user_hour_features_hour
+    ON user_hour_features(shift_hour);
+CREATE INDEX IF NOT EXISTS idx_user_dayofweek_features_day
+    ON user_dayofweek_features(shift_dayofweek);
 """
 
 

@@ -1303,6 +1303,52 @@ make test: passed
 make precommit: passed
 ```
 
+### 21.5. Time-preference признаки
+
+Следующий эксперимент добавил признаки привычных часов и дней недели пользователя:
+
+- `user_hour_features` — история пользователя по часу начала смены;
+- `user_dayofweek_features` — история пользователя по дню недели;
+- `hour_apply_rate`, `hour_apply_cnt`, `hour_finished_cnt`;
+- `dayofweek_apply_rate`, `dayofweek_apply_cnt`, `dayofweek_finished_cnt`.
+
+Мягкий буст по этим признакам был добавлен в `rule_score`.
+
+No-RPC проверка:
+
+```text
+target_metric: 0.7202622913319693
+days_evaluated: 14
+evaluated_groups: 47
+evaluated_shifts: 86
+```
+
+Полный RPC-eval:
+
+Артефакт: `artifacts/new_eval_time_features_rpm200/eval_report.md`.
+
+```text
+overall_target_metric: 0.7366416461041813
+days_evaluated: 14
+stop_reason: completed
+predict_rpm: 199.987
+predict_latency_p50_ms: 160.702
+predict_latency_p80_ms: 170.817
+predict_latency_p95_ms: 192.231
+prepare_duration_avg_sec: 10.5
+```
+
+Прирост относительно предыдущего tuned eval: `+0.019532` абсолютных пункта, около `+2.7%`.
+Прирост относительно первого ML-прогона на новом датасете: `+0.071828` абсолютных пункта,
+около `+10.8%`.
+
+Проверки:
+
+```text
+make test: passed
+make precommit: passed
+```
+
 ### 21.4. Дополнительная настройка весов
 
 После итогового eval был проведен более плотный grid-search весов для уже добавленных context и

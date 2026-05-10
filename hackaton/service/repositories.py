@@ -106,6 +106,8 @@ class Repository:
             "user_shift_features",
             "user_recurring_shift_features",
             "employer_features",
+            "user_hour_features",
+            "user_dayofweek_features",
         }:
             raise ValueError(f"unsupported table: {table_name}")
         query = f"SELECT COUNT(1) FROM {table_name}"  # nosec - table is validated above
@@ -124,6 +126,8 @@ class Repository:
         DELETE FROM user_shift_features;
         DELETE FROM user_recurring_shift_features;
         DELETE FROM employer_features;
+        DELETE FROM user_hour_features;
+        DELETE FROM user_dayofweek_features;
 
         INSERT INTO user_features (
             user_id,
@@ -279,6 +283,32 @@ class Repository:
             SUM(capacity) AS capacity_sum
         FROM shift_apply
         GROUP BY employer_id;
+
+        INSERT INTO user_hour_features (
+            user_id, shift_hour, view_cnt, apply_cnt, finished_cnt
+        )
+        SELECT
+            e.user_id,
+            CAST(substr(s.start_at, 12, 2) AS INTEGER) AS shift_hour,
+            SUM(CASE WHEN e.interaction = 'VIEW' THEN 1 ELSE 0 END) AS view_cnt,
+            SUM(CASE WHEN e.interaction = 'APPLY' THEN 1 ELSE 0 END) AS apply_cnt,
+            SUM(CASE WHEN e.interaction = 'FINISHED' THEN 1 ELSE 0 END) AS finished_cnt
+        FROM events e
+        JOIN shifts s ON s.id = e.shift_id
+        GROUP BY e.user_id, CAST(substr(s.start_at, 12, 2) AS INTEGER);
+
+        INSERT INTO user_dayofweek_features (
+            user_id, shift_dayofweek, view_cnt, apply_cnt, finished_cnt
+        )
+        SELECT
+            e.user_id,
+            CAST(strftime('%w', s.start_at) AS INTEGER) AS shift_dayofweek,
+            SUM(CASE WHEN e.interaction = 'VIEW' THEN 1 ELSE 0 END) AS view_cnt,
+            SUM(CASE WHEN e.interaction = 'APPLY' THEN 1 ELSE 0 END) AS apply_cnt,
+            SUM(CASE WHEN e.interaction = 'FINISHED' THEN 1 ELSE 0 END) AS finished_cnt
+        FROM events e
+        JOIN shifts s ON s.id = e.shift_id
+        GROUP BY e.user_id, CAST(strftime('%w', s.start_at) AS INTEGER);
         """
         async with aiosqlite.connect(self.db_path) as db:
             await db.executescript(query)
@@ -591,6 +621,18 @@ class Repository:
                 WHEN ursf.last_apply_ts IS NULL THEN 9999.0
                 ELSE MAX(0.0, julianday(:target_start_at) - julianday(ursf.last_apply_ts))
             END AS recurring_apply_recency_days,
+            COALESCE(uhf.view_cnt, 0) AS hour_view_cnt,
+            COALESCE(uhf.apply_cnt, 0) AS hour_apply_cnt,
+            COALESCE(uhf.finished_cnt, 0) AS hour_finished_cnt,
+            COALESCE(uhf.apply_cnt, 0) * 1.0
+                / MAX(1, COALESCE(uhf.view_cnt, 0) + COALESCE(uhf.apply_cnt, 0))
+                AS hour_apply_rate,
+            COALESCE(udf.view_cnt, 0) AS dayofweek_view_cnt,
+            COALESCE(udf.apply_cnt, 0) AS dayofweek_apply_cnt,
+            COALESCE(udf.finished_cnt, 0) AS dayofweek_finished_cnt,
+            COALESCE(udf.apply_cnt, 0) * 1.0
+                / MAX(1, COALESCE(udf.view_cnt, 0) + COALESCE(udf.apply_cnt, 0))
+                AS dayofweek_apply_rate,
             (
                 CASE WHEN u.location_id = :location_id THEN 30.0 ELSE 0.0 END
                 + CASE WHEN u.has_mk = 1 THEN 8.0 ELSE 0.0 END
@@ -615,6 +657,10 @@ class Repository:
                 + COALESCE(uwf.finished_cnt, 0) * 24.0
                 + COALESCE(uwf.apply_cnt, 0) * 12.0
                 + COALESCE(uwf.view_cnt, 0) * 0.5
+                + COALESCE(uhf.finished_cnt, 0) * 4.0
+                + COALESCE(uhf.apply_cnt, 0) * 2.5
+                + COALESCE(udf.finished_cnt, 0) * 3.0
+                + COALESCE(udf.apply_cnt, 0) * 2.0
                 + COALESCE(ulf.finished_cnt, 0) * 7.5
                 + COALESCE(ulf.apply_cnt, 0) * 4.5
                 + COALESCE(ef.avg_fill_rate, 0.0) * 4.5
@@ -677,6 +723,10 @@ class Repository:
             AND ursf.workplace_id = :workplace_id
             AND ursf.shift_hour = :shift_hour
             AND ursf.shift_dayofweek = :shift_dayofweek
+        LEFT JOIN user_hour_features uhf
+            ON uhf.user_id = u.id AND uhf.shift_hour = :shift_hour
+        LEFT JOIN user_dayofweek_features udf
+            ON udf.user_id = u.id AND udf.shift_dayofweek = :shift_dayofweek
         LEFT JOIN employer_features ef ON ef.employer_id = :employer_id
         WHERE (:need_mk = 0 OR u.has_mk = 1)
           AND (
@@ -688,6 +738,8 @@ class Repository:
               OR ulf.user_id IS NOT NULL
               OR usf.user_id IS NOT NULL
               OR ursf.user_id IS NOT NULL
+              OR uhf.user_id IS NOT NULL
+              OR udf.user_id IS NOT NULL
           )
         ORDER BY rule_score DESC, u.location_id = :location_id DESC, u.has_mk DESC, u.id ASC
         LIMIT :limit
