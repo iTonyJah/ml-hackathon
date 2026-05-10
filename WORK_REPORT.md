@@ -1223,3 +1223,82 @@ possible TOP-10 ROC-AUC@0.1: 0.754555
 - проверить признаки по дневным/недельным циклам активности пользователя;
 - отдельно оптимизировать группы `capacity=1`, потому что именно они почти не видны локальному
   evaluator, но оцениваются в TOP-10 ROC-AUC@0.1.
+
+## 21. Работа на новом датасете `data/new_data.zip`
+
+Новый датасет был распакован и разделен на train/validation:
+
+- train split: `data/new_train_split`;
+- validation split: `data/new_validation`;
+- cutoff date: `2026-03-09`;
+- train: `8,802` users, `54,131` shifts, `662,338` events;
+- validation: `11,493` shifts, `4,699` apply rows.
+
+### 21.1. Базовые прогоны
+
+Первый полный eval сервиса с ML-реранкером:
+
+```text
+overall_target_metric: 0.6648136948382045
+days_evaluated: 14
+stop_reason: completed
+```
+
+Диагностика весов показала, что реранкер ухудшает порядок в TOP-10 на новом датасете:
+
+```text
+ML_RERANKER_WEIGHT=0.0: ~0.6945 в no-RPC симуляции
+ML_RERANKER_WEIGHT=0.5: ~0.6758
+ML_RERANKER_WEIGHT=1.0: ~0.5390
+```
+
+После этого ML-реранкер был отключен по умолчанию, а дефолтный вес выставлен в `0.0`.
+Полный RPC-eval rule-only:
+
+```text
+overall_target_metric: 0.69020080124772
+days_evaluated: 14
+stop_reason: completed
+predict_rpm: 200.059
+```
+
+### 21.2. Добавленный feature engineering
+
+В live-сервис были добавлены новые агрегаты и признаки:
+
+- `active_days` в `user_features`;
+- `user_location_features` — история пользователя по локации;
+- `user_shift_features` — exact-история пользователя по `shift_id`;
+- `user_recurring_shift_features` — история повторяющихся смен по ключу
+  `location_id + task_type + employer_id + workplace_id + shift_hour + shift_dayofweek`;
+- `employer_features` — средний fill rate работодателя;
+- признаки recency для exact и recurring apply.
+
+Агрессивные веса recurring-признаков ухудшили no-RPC score до `0.6803`, поэтому был проведен
+sweep формул. Лучший консервативный вариант дал около `0.7118` в no-RPC симуляции и был
+перенесен в `rule_score`.
+
+### 21.3. Итоговый полный eval
+
+Артефакт: `artifacts/new_eval_feature_engineering_rpm200/eval_report.md`.
+
+```text
+overall_target_metric: 0.7086384187837267
+days_evaluated: 14
+stop_reason: completed
+predict_rpm: 200.020
+predict_latency_p50_ms: 115.569
+predict_latency_p80_ms: 121.903
+predict_latency_p95_ms: 133.175
+prepare_duration_avg_sec: 9.3
+```
+
+Прирост относительно rule-only прогона: `+0.018438` абсолютных пункта, около `+2.7%`.
+Прирост относительно первого ML-прогона: `+0.043825` абсолютных пункта, около `+6.6%`.
+
+Проверки:
+
+```text
+make test: passed
+make precommit: passed
+```
