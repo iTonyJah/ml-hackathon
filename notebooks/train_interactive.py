@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-
 """
 Interactive training pipeline for VS Code Interactive Window.
 
@@ -25,9 +24,12 @@ from dataclasses import asdict
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+from IPython.display import display
 
 from hackaton.eval.metric import calculate_target_metric
+from hackaton.service.ml_model import MLModel
 
 # Импортируем компоненты из hackaton.train
 from hackaton.train.training import (
@@ -225,8 +227,19 @@ display_cols = [
 ]
 available_cols = [c for c in display_cols if c in frame.columns]
 print(frame[available_cols].head().to_string(index=False))
+# %%
+# Сохраним frame, как артефакт
+# Создаем директорию, если она еще не существует
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+# Сохраняем frame в файл pickle
+frame.to_pickle(OUTPUT_DIR / "frame.pkl")
 
 
+# %% [3] Детали
+print(frame.info())
+display(frame.describe())
+display(frame.describe(include=str))
+#
 # =============================================================================
 # %% [4] Временной split
 # =============================================================================
@@ -508,15 +521,101 @@ if len(x_test) > 0:
     print(f"   Actual target: {sample_actual}")
     print(f"   Prediction {'correct' if (sample_proba > 0.5) == sample_actual else 'incorrect'}")
 
-# 🔧 EXTENSION POINT: Интеграция с сервисом предсказаний
-# Для использования в production:
-#   from hackaton.service.ml_model import MLModel
-#   ml_model = MLModel()
-#   ml_model.load_from_pickle(output_dir / "model.pkl")
-#   scores = ml_model.predict_scores(user_ids, users_cache, shift_dict)
 
-print("\n✅ Sandbox готов к экспериментам!")
-print("   Используйте loaded_pipeline для новых предсказаний.")
+# =============================================================================
+# %% [7b] Интеграция с MLModel (LightGBM + reranking)
+# =============================================================================
+"""
+Интеграция с классом MLModel из hackaton.service.ml_model:
+  - Векторизованный инференс по всем пользователям
+  - Reranking по recency последнего apply к конкретной смене
+  - Фичи _make_features (user history, shift features, cross features)
+"""
+
+# Создать экземпляр модели
+ml_model = MLModel()
+
+print("\n🚀 Обучение MLModel (LightGBM + reranking)...")
+
+# Подготовка данных для MLModel.train()
+# Требуемый интерфейс: train(events, shifts, users)
+# events: DataFrame с колонками [user_id, shift_id, interaction, ts]
+# shifts: DataFrame с колонками [id, start_at, hours, reward, capacity, need_mk, ...]
+# users: DataFrame с колонками [id, has_mk, location_id, ...]
+
+# Используем те же данные, что и для baseline модели
+# Важно: MLModel ожидает сырые события до агрегации
+ml_model.train(events=events, shifts=shifts, users=users)
+
+print("✅ MLModel обучена!")
+print(f"   is_trained: {ml_model.is_trained}")
+print(f"   model type: {type(ml_model.model).__name__}")
+print(f"   users in stats: {len(ml_model._user_stats)}")
+print(f"   employers in stats: {len(ml_model._employer_stats)}")
+print(f"   (user, shift) pairs with prior applies: {len(ml_model._apply_map)}")
+print(f"   sleeping workers (0 applies, ≥1 finish): {len(ml_model._sleeper_set)}")
+
+# Построение векторизованного кэша для быстрого инференса
+ml_model.build_inference_cache(users)
+print("✅ Inference cache построен для векторизованных предсказаний")
+
+# Пример использования predict_scores для конкретной смены
+if len(shifts) > 0 and len(users) > 0:
+    # Берём первую смену из теста для демонстрации
+    test_shift_ids = test_frame["shift_id"].unique()
+    if len(test_shift_ids) > 0:
+        demo_shift_id = str(test_shift_ids[0])
+        demo_shift_row = shifts[shifts["id"] == demo_shift_id].iloc[0].to_dict()
+
+        print(f"\n📋 Демонстрация predict_scores для смены {demo_shift_id}:")
+        print(f"   start_at: {demo_shift_row.get('start_at', 'N/A')}")
+        print(f"   hours: {demo_shift_row.get('hours', 'N/A')}")
+        print(f"   reward: {demo_shift_row.get('reward', 'N/A')}")
+
+        # Получаем всех пользователей для ранжирования
+        all_user_ids = users["id"].astype(str).tolist()
+
+        # Вызов predict_scores — возвращает отсортированный список (user_id, score)
+        # с учётом reranking по recency последнего apply к этой смене
+        scored_candidates = ml_model.predict_scores(
+            user_ids=all_user_ids,
+            users_dict={str(r["id"]): r.to_dict() for _, r in users.iterrows()},
+            shift_row=demo_shift_row,
+        )
+
+        print("\n🏆 Top-10 кандидатов после reranking:")
+        for i, (uid, score) in enumerate(scored_candidates[:10]):
+            # Проверяем, был ли у пользователя prior apply к этой смене
+            last_apply_ts = ml_model._apply_ts_map.get((uid, demo_shift_id))
+            recency_info = ""
+            if last_apply_ts is not None:
+                shift_start = pd.to_datetime(demo_shift_row.get("start_at"), utc=True)
+                if shift_start is not pd.NaT:
+                    days_ago = (shift_start.timestamp() - last_apply_ts) / 86400.0
+                    recency_info = f" (apply {days_ago:.1f} days ago)"
+            print(f"   #{i + 1}: user={uid}, score={score:.4f}{recency_info}")
+
+        # Сравнение с baseline моделью для тех же пользователей
+        print("\n📊 Сравнение MLModel vs LogisticRegression:")
+
+        # Для сравнения берём пользователей, которые есть в test_frame
+        test_user_ids = test_frame["user_id"].astype(str).unique()[:100]  # первые 100
+
+        # MLModel scores
+        ml_scores_dict = dict(scored_candidates)
+        ml_scores_for_comparison = [ml_scores_dict.get(uid, 0.0) for uid in test_user_ids]
+
+        # LogisticRegression scores (из pipeline)
+        lr_proba = loaded_pipeline.predict_proba(x_test)[:, 1]
+        lr_scores_dict = dict(zip(test_frame.index, lr_proba))
+
+        print(f"   MLModel top score: {max(ml_scores_for_comparison):.4f}")
+        print(f"   MLModel mean score: {np.mean(ml_scores_for_comparison):.4f}")
+        print(f"   LR mean score on test: {lr_proba.mean():.4f}")
+
+print("\n✅ Sandbox готов к экспериментам с MLModel!")
+print("   Используйте ml_model.predict_scores() для ранжирования кандидатов.")
+print("   Используйте ml_model._rerank_by_apply_recency() для ручного reranking.")
 
 
 # =============================================================================
