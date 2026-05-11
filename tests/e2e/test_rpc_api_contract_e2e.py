@@ -79,8 +79,12 @@ def test_prepare_ready_predict_contract(tmp_path: Path) -> None:
         predict_while_prepare = await service.predict(predict_payload)
         assert predict_while_prepare["status_code"] == 503
 
-        await asyncio.sleep(0.1)
         ready = await service.ready(None)
+        for _ in range(20):
+            if ready["status_code"] == 200:
+                break
+            await asyncio.sleep(0.05)
+            ready = await service.ready(None)
         assert ready["status_code"] == 200
         assert ready["ready"]
 

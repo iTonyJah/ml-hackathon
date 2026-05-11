@@ -1223,3 +1223,212 @@ possible TOP-10 ROC-AUC@0.1: 0.754555
 - проверить признаки по дневным/недельным циклам активности пользователя;
 - отдельно оптимизировать группы `capacity=1`, потому что именно они почти не видны локальному
   evaluator, но оцениваются в TOP-10 ROC-AUC@0.1.
+
+## 21. Работа на новом датасете `data/new_data.zip`
+
+Новый датасет был распакован и разделен на train/validation:
+
+- train split: `data/new_train_split`;
+- validation split: `data/new_validation`;
+- cutoff date: `2026-03-09`;
+- train: `8,802` users, `54,131` shifts, `662,338` events;
+- validation: `11,493` shifts, `4,699` apply rows.
+
+### 21.1. Базовые прогоны
+
+Первый полный eval сервиса с ML-реранкером:
+
+```text
+overall_target_metric: 0.6648136948382045
+days_evaluated: 14
+stop_reason: completed
+```
+
+Диагностика весов показала, что реранкер ухудшает порядок в TOP-10 на новом датасете:
+
+```text
+ML_RERANKER_WEIGHT=0.0: ~0.6945 в no-RPC симуляции
+ML_RERANKER_WEIGHT=0.5: ~0.6758
+ML_RERANKER_WEIGHT=1.0: ~0.5390
+```
+
+После этого ML-реранкер был отключен по умолчанию, а дефолтный вес выставлен в `0.0`.
+Полный RPC-eval rule-only:
+
+```text
+overall_target_metric: 0.69020080124772
+days_evaluated: 14
+stop_reason: completed
+predict_rpm: 200.059
+```
+
+### 21.2. Добавленный feature engineering
+
+В live-сервис были добавлены новые агрегаты и признаки:
+
+- `active_days` в `user_features`;
+- `user_location_features` — история пользователя по локации;
+- `user_shift_features` — exact-история пользователя по `shift_id`;
+- `user_recurring_shift_features` — история повторяющихся смен по ключу
+  `location_id + task_type + employer_id + workplace_id + shift_hour + shift_dayofweek`;
+- `employer_features` — средний fill rate работодателя;
+- признаки recency для exact и recurring apply.
+
+Агрессивные веса recurring-признаков ухудшили no-RPC score до `0.6803`, поэтому был проведен
+sweep формул. Лучший консервативный вариант дал около `0.7118` в no-RPC симуляции и был
+перенесен в `rule_score`.
+
+### 21.3. Итоговый полный eval
+
+Артефакт: `artifacts/new_eval_feature_engineering_rpm200/eval_report.md`.
+
+```text
+overall_target_metric: 0.7086384187837267
+days_evaluated: 14
+stop_reason: completed
+predict_rpm: 200.020
+predict_latency_p50_ms: 115.569
+predict_latency_p80_ms: 121.903
+predict_latency_p95_ms: 133.175
+prepare_duration_avg_sec: 9.3
+```
+
+Прирост относительно rule-only прогона: `+0.018438` абсолютных пункта, около `+2.7%`.
+Прирост относительно первого ML-прогона: `+0.043825` абсолютных пункта, около `+6.6%`.
+
+Проверки:
+
+```text
+make test: passed
+make precommit: passed
+```
+
+### 21.5. Time-preference признаки
+
+Следующий эксперимент добавил признаки привычных часов и дней недели пользователя:
+
+- `user_hour_features` — история пользователя по часу начала смены;
+- `user_dayofweek_features` — история пользователя по дню недели;
+- `hour_apply_rate`, `hour_apply_cnt`, `hour_finished_cnt`;
+- `dayofweek_apply_rate`, `dayofweek_apply_cnt`, `dayofweek_finished_cnt`.
+
+Мягкий буст по этим признакам был добавлен в `rule_score`.
+
+No-RPC проверка:
+
+```text
+target_metric: 0.7202622913319693
+days_evaluated: 14
+evaluated_groups: 47
+evaluated_shifts: 86
+```
+
+Полный RPC-eval:
+
+Артефакт: `artifacts/new_eval_time_features_rpm200/eval_report.md`.
+
+```text
+overall_target_metric: 0.7366416461041813
+days_evaluated: 14
+stop_reason: completed
+predict_rpm: 199.987
+predict_latency_p50_ms: 160.702
+predict_latency_p80_ms: 170.817
+predict_latency_p95_ms: 192.231
+prepare_duration_avg_sec: 10.5
+```
+
+Прирост относительно предыдущего tuned eval: `+0.019532` абсолютных пункта, около `+2.7%`.
+Прирост относительно первого ML-прогона на новом датасете: `+0.071828` абсолютных пункта,
+около `+10.8%`.
+
+Проверки:
+
+```text
+make test: passed
+make precommit: passed
+```
+
+### 21.6. Дополнительная настройка весов
+
+После итогового eval был проведен более плотный grid-search весов для уже добавленных context и
+recurring компонентов `rule_score`.
+
+Лучшая no-RPC комбинация:
+
+```text
+context_scale: 0.75
+recurring_scale: 0.3
+target_metric: 0.7178592257286235
+evaluated_groups: 48
+evaluated_shifts: 87
+```
+
+Эти веса были перенесены в `rule_score`, после чего выполнен полный RPC-eval.
+
+Артефакт: `artifacts/new_eval_weight_tuned_rpm200/eval_report.md`.
+
+```text
+overall_target_metric: 0.7171094834916615
+days_evaluated: 14
+stop_reason: completed
+predict_rpm: 200.017
+predict_latency_p50_ms: 115.588
+predict_latency_p80_ms: 122.252
+predict_latency_p95_ms: 133.720
+prepare_duration_avg_sec: 8.7
+```
+
+Прирост относительно предыдущего feature engineering eval: `+0.008471` абсолютных пункта,
+около `+1.2%`.
+
+Прирост относительно первого ML-прогона на новом датасете: `+0.052296` абсолютных пункта,
+около `+7.9%`.
+
+Проверки:
+
+```text
+make test: passed
+make precommit: passed
+```
+
+### 21.7. Rerank по точному повтору смены
+
+Из ветки `improve/sleeper-rerank` внешнего репозитория была перенесена ключевая идея:
+кандидаты, которые уже подавались на этот же `shift_id`, должны попадать выше остальных,
+а внутри этой группы сортироваться по свежести последней заявки.
+
+В `rule_score` такие признаки уже учитывались, но мягкого буста оказалось недостаточно для нового
+датасета. Поэтому порядок кандидатов в SQL был усилен до жесткого pre-rerank перед `rule_score`:
+
+```text
+1. выше пользователи с user_shift_features.apply_cnt > 0
+2. среди них выше более свежий last_apply_ts относительно target_start_at
+3. дальше прежний rule_score и tie-breakers
+```
+
+Полный RPC-eval:
+
+Артефакт: `artifacts/new_eval_exact_apply_order_rpm200/eval_report.md`.
+
+```text
+overall_target_metric: 0.9202597611740159
+days_evaluated: 14
+stop_reason: completed
+predict_rpm: 199.965
+predict_latency_p50_ms: 163.637
+predict_latency_p80_ms: 175.611
+predict_latency_p95_ms: 196.979
+prepare_duration_avg_sec: 15.0
+```
+
+Прирост относительно предыдущего лучшего полного RPC-eval: `+0.183618` абсолютных пункта.
+
+Проверки:
+
+```text
+make test: passed
+```
+
+Дополнительно исправлен флейк в `test_prepare_ready_predict_contract`: вместо фиксированного
+`asyncio.sleep(0.1)` тест теперь опрашивает `ready` до завершения фонового `prepare`.
