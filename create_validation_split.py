@@ -20,9 +20,10 @@ TRAIN_DIR = DATA_DIR / "new_train"
 VAL_DIR = DATA_DIR / "new_validation"
 
 # Финальная оценка — на последних 1-2 неделях.
-# Новые данные заканчиваются ~2026-03-22, берём последние 2 недели как val.
-SPLIT_DATE = pd.Timestamp("2026-03-08", tz="UTC")
-SPLIT_DATE_PLAIN = datetime.date(2026, 3, 8)
+# Новые данные заканчиваются ~2026-03-22, берём последние 2 недели как val.2026-03-08
+# 1 неделю 2026-03-15
+SPLIT_DATE = pd.Timestamp("2026-03-15", tz="UTC")
+SPLIT_DATE_PLAIN = datetime.date(2026, 3, 15)
 
 
 def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
