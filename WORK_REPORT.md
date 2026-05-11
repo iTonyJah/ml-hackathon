@@ -1349,7 +1349,7 @@ make test: passed
 make precommit: passed
 ```
 
-### 21.4. Дополнительная настройка весов
+### 21.6. Дополнительная настройка весов
 
 После итогового eval был проведен более плотный grid-search весов для уже добавленных context и
 recurring компонентов `rule_score`.
@@ -1391,3 +1391,44 @@ prepare_duration_avg_sec: 8.7
 make test: passed
 make precommit: passed
 ```
+
+### 21.7. Rerank по точному повтору смены
+
+Из ветки `improve/sleeper-rerank` внешнего репозитория была перенесена ключевая идея:
+кандидаты, которые уже подавались на этот же `shift_id`, должны попадать выше остальных,
+а внутри этой группы сортироваться по свежести последней заявки.
+
+В `rule_score` такие признаки уже учитывались, но мягкого буста оказалось недостаточно для нового
+датасета. Поэтому порядок кандидатов в SQL был усилен до жесткого pre-rerank перед `rule_score`:
+
+```text
+1. выше пользователи с user_shift_features.apply_cnt > 0
+2. среди них выше более свежий last_apply_ts относительно target_start_at
+3. дальше прежний rule_score и tie-breakers
+```
+
+Полный RPC-eval:
+
+Артефакт: `artifacts/new_eval_exact_apply_order_rpm200/eval_report.md`.
+
+```text
+overall_target_metric: 0.9202597611740159
+days_evaluated: 14
+stop_reason: completed
+predict_rpm: 199.965
+predict_latency_p50_ms: 163.637
+predict_latency_p80_ms: 175.611
+predict_latency_p95_ms: 196.979
+prepare_duration_avg_sec: 15.0
+```
+
+Прирост относительно предыдущего лучшего полного RPC-eval: `+0.183618` абсолютных пункта.
+
+Проверки:
+
+```text
+make test: passed
+```
+
+Дополнительно исправлен флейк в `test_prepare_ready_predict_contract`: вместо фиксированного
+`asyncio.sleep(0.1)` тест теперь опрашивает `ready` до завершения фонового `prepare`.

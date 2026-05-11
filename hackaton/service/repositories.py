@@ -741,7 +741,16 @@ class Repository:
               OR uhf.user_id IS NOT NULL
               OR udf.user_id IS NOT NULL
           )
-        ORDER BY rule_score DESC, u.location_id = :location_id DESC, u.has_mk DESC, u.id ASC
+        ORDER BY
+            COALESCE(usf.apply_cnt, 0) > 0 DESC,
+            CASE
+                WHEN usf.last_apply_ts IS NULL THEN 9999.0
+                ELSE MAX(0.0, julianday(:target_start_at) - julianday(usf.last_apply_ts))
+            END ASC,
+            rule_score DESC,
+            u.location_id = :location_id DESC,
+            u.has_mk DESC,
+            u.id ASC
         LIMIT :limit
         """
         params = {
