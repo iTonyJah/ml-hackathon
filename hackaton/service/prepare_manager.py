@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 import aiosqlite
 import pandas as pd
@@ -155,18 +156,25 @@ class PrepareManager:
             # Строим кэш активных пользователей (быстро, в основном потоке)
             self._build_cache(users, events)
 
-            # Обучаем модель в executor чтобы не блокировать event loop
-            if not events.empty and not shifts.empty:
-                loop = asyncio.get_event_loop()
-
-                def _train_and_cache() -> None:
-                    self.model.train(events, shifts, users)
-                    # После обучения строим векторизованный кэш для быстрого inference
-                    self.model.build_inference_cache(users)
-
-                await loop.run_in_executor(None, _train_and_cache)
+            # Check if model exists in artifacts and load it, otherwise train
+            model_path = Path("artifacts/train/model.pkl")
+            if model_path.exists():
+                LOGGER.info("Loading model from artifacts: %s", model_path)
+                self.model = MLModel.load(model_path)
             else:
-                LOGGER.warning("Not enough data to train model")
+                LOGGER.info("Model not found, training new model...")
+                # Обучаем модель в executor чтобы не блокировать event loop
+                if not events.empty and not shifts.empty:
+                    loop = asyncio.get_event_loop()
+
+                    def _train_and_cache() -> None:
+                        self.model.train(events, shifts, users)
+                        # После обучения строим векторизованный кэш для быстрого inference
+                        self.model.build_inference_cache(users)
+
+                    await loop.run_in_executor(None, _train_and_cache)
+                else:
+                    LOGGER.warning("Not enough data to train model")
 
             LOGGER.info("PrepareManager: prepare complete, model ready=%s", self.model.is_trained)
             self._state.ready = True

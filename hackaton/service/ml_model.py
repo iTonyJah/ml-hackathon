@@ -6,6 +6,7 @@ LightGBM + векторизованный inference по всем пользов
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -388,9 +389,15 @@ class MLModel:
             from sklearn.model_selection import train_test_split
 
             pos_weight = float((y == 0).sum()) / max(1, (y == 1).sum())
-            X_tr, X_val, y_tr, y_val = train_test_split(
-                X, y, test_size=0.15, random_state=42, stratify=y
-            )
+            # Handle stratified split only if we have enough samples per class
+            min_class_count = min(np.sum(y == 0), np.sum(y == 1))
+            if min_class_count >= 2:
+                X_tr, X_val, y_tr, y_val = train_test_split(
+                    X, y, test_size=0.15, random_state=42, stratify=y
+                )
+            else:
+                # Fallback to non-stratified split for small datasets
+                X_tr, X_val, y_tr, y_val = train_test_split(X, y, test_size=0.15, random_state=42)
             self.model = lgb.LGBMClassifier(
                 n_estimators=1000,
                 learning_rate=0.05,
@@ -440,6 +447,27 @@ class MLModel:
             LOGGER.info("LogisticRegression trained, samples=%d", len(X_fb))
 
         self.is_trained = True
+
+    def save(self, path: str | Path) -> None:
+        """Save model to disk using joblib."""
+        import joblib
+
+        model_path = Path(path)
+        model_path.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump(self, model_path)
+        LOGGER.info("Model saved to %s", model_path)
+
+    @staticmethod
+    def load(path: str | Path) -> MLModel:
+        """Load model from disk using joblib."""
+        import joblib
+
+        model_path = Path(path)
+        if not model_path.exists():
+            raise FileNotFoundError(f"Model file not found: {model_path}")
+        model = joblib.load(model_path)
+        LOGGER.info("Model loaded from %s", model_path)
+        return model
 
     def _rerank_by_apply_recency(
         self,

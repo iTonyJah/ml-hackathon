@@ -35,6 +35,9 @@ def cli() -> None:
     "--val-event-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), required=True
 )
 @click.option("--output-dir", type=click.Path(path_type=Path, file_okay=False), required=True)
+@click.option(
+    "--model-path", type=click.Path(path_type=Path, exists=True, dir_okay=False), default=None
+)
 @click.option("--limit", type=int, default=10, show_default=True)
 @click.option("--batch-size", type=int, default=1000, show_default=True)
 @click.option("--prepare-initial-timeout-sec", type=int, default=1200, show_default=True)
@@ -54,6 +57,7 @@ def run_cmd(
     val_shift_path: Path,
     val_event_path: Path,
     output_dir: Path,
+    model_path: Path | None,
     limit: int,
     batch_size: int,
     prepare_initial_timeout_sec: int,
@@ -69,6 +73,21 @@ def run_cmd(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
+
+    # Check for model existence before running evaluation
+    if model_path is not None and not model_path.exists():
+        click.echo(f"Error: Model file not found at {model_path}", err=True)
+        click.echo("Run 'train' first or use --model-path to specify a valid model path.", err=True)
+        raise SystemExit(1)
+
+    default_model_path = Path("artifacts/train/model.pkl")
+    if model_path is None and not default_model_path.exists():
+        click.echo(f"Error: No model found at {default_model_path}", err=True)
+        click.echo("Run 'train' first or use --model-path to specify a model path.", err=True)
+        raise SystemExit(1)
+
+    # effective_model_path = model_path if model_path is not None else default_model_path
+
     cfg = EvalConfig(
         host=host,
         port=port,
