@@ -228,11 +228,12 @@ display_cols = [
 available_cols = [c for c in display_cols if c in frame.columns]
 print(frame[available_cols].head().to_string(index=False))
 # %%
-# Сохраним frame, как артефакт
+# Сохраним frame, events как артефакты
 # Создаем директорию, если она еще не существует
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-# Сохраняем frame в файл pickle
+# Сохраняем frame, events в файл pickle
 frame.to_pickle(OUTPUT_DIR / "frame.pkl")
+events.to_pickle(OUTPUT_DIR / "events.pkl")
 
 
 # %% [3] Детали

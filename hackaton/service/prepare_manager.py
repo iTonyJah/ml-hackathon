@@ -160,7 +160,16 @@ class PrepareManager:
             model_path = Path("artifacts/train/model.pkl")
             if model_path.exists():
                 LOGGER.info("Loading model from artifacts: %s", model_path)
-                self.model = MLModel.load(model_path)
+                loaded_model = MLModel.load(model_path)
+                # Loaded model could be either MLModel or sklearn Pipeline
+                # If it's a Pipeline, wrap it or mark as trained
+                if hasattr(loaded_model, "is_trained"):
+                    self.model = loaded_model
+                else:
+                    # It's a sklearn Pipeline — create MLModel wrapper
+                    self.model = MLModel()
+                    self.model.model = loaded_model
+                    self.model.is_trained = True
             else:
                 LOGGER.info("Model not found, training new model...")
                 # Обучаем модель в executor чтобы не блокировать event loop
