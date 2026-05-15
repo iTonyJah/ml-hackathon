@@ -16,8 +16,8 @@ import pandas as pd
 
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
-TRAIN_DIR = DATA_DIR / "new_train"
-VAL_DIR = DATA_DIR / "new_validation"
+TRAIN_DIR = DATA_DIR / "train"
+VAL_DIR = DATA_DIR / "validation"
 
 # Финальная оценка — на последних 1-2 неделях.
 # Новые данные заканчиваются ~2026-03-22, берём последние 2 недели как val.
