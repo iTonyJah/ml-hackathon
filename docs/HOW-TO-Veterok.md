@@ -11,7 +11,7 @@ make install
 # Копируем полученные файлы в data/train
 
 # Создание валидационного сплита (обязательно перед eval)
-poetry run python create_validation_split.py
+poetry run python scripts/create_validation_split.py
 
 # Создание базы данных
 make migrate

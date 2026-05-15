@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pandas as pd
 
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
 TRAIN_DIR = DATA_DIR / "train"
 VAL_DIR = DATA_DIR / "validation"
