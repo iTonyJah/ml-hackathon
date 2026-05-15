@@ -142,9 +142,7 @@ def validate_split(
         print(f"  [OK] Все даты в apply.csv в диапазоне [{val_min_date}, {val_max_date}]")
 
     # date совпадает с shift.start_at.date()
-    shift_start_map = {
-        str(r["id"]): r["start_at"].date() for _, r in val_shifts.iterrows()
-    }
+    shift_start_map = {str(r["id"]): r["start_at"].date() for _, r in val_shifts.iterrows()}
     wrong_dates = [
         (r["shift_id"], r["date"], shift_start_map.get(str(r["shift_id"])))
         for _, r in apply.iterrows()
