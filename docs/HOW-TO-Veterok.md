@@ -10,7 +10,9 @@ make install
 
 # Копируем полученные файлы в data/train
 
-# Создание валидационного сплита (обязательно перед eval)
+# Создание валидационного сплита
+# (обязательно перед eval для участника так data/validation у нас нет)
+# (заказчик и проверяющий копируют файлы в data/validation самостоятельно)
 poetry run python scripts/create_validation_split.py
 
 # Создание базы данных
@@ -19,7 +21,7 @@ make migrate
 # Запуск сервиса (в отдельном терминале)
 make run
 
-# Официальный eval
+# Официальный eval для участника
 poetry run python -m hackaton.eval.cli run \
   --user-path data/train/user.csv \
   --shift-path data/train/shift_train.csv \
@@ -41,5 +43,20 @@ poetry run python -m hackaton.train.cli cv \
   --output-dir artifacts/cv_run \
   --val-days 30
 ```
-
 Результаты CV сохраняются в `artifacts/cv_run/cv_report.md`.
+
+# Официальный eval для заказчика/проверяющего
+(заказчик и проверяющий копируют файлы в data/train, data/validation самостоятельно)
+```bash
+# Официальный eval для заказчика/проверяющего
+poetry run python -m hackaton.eval.cli run \
+  --user-path data/train/user.csv \
+  --shift-path data/train/shift.csv \
+  --event-path data/train/event.csv \
+  --val-apply-path data/validation/apply.csv \
+  --val-shift-path data/validation/shift.csv \
+  --val-event-path data/validation/event.csv \
+  --output-dir artifacts/eval_run \
+  --limit 10 \
+  --batch-size 1000
+```
