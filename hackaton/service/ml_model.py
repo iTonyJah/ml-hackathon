@@ -6,9 +6,13 @@ LightGBM + векторизованный inference по всем пользов
 from __future__ import annotations
 
 import logging
+import warnings
 
 import numpy as np
 import pandas as pd
+
+# Suppress sklearn feature names warning for LGBMClassifier when using numpy arrays
+warnings.filterwarnings("ignore", message=".*X does not have valid feature names.*")
 
 LOGGER = logging.getLogger(__name__)
 
