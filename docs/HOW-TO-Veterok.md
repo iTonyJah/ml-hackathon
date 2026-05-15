@@ -1,4 +1,4 @@
-# Как воспроизвести результаты (realese/)
+# Как воспроизвести результаты (release/sleeper-rerank)
 
 ```bash
 git clone https://github.com/iTonyJah/ml-hackathon.git
