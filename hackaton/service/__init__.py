@@ -1,1 +1,1 @@
-"""Service package for hackathon API."""
+"""Пакет сервиса для API хакатона."""

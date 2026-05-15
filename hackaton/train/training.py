@@ -151,7 +151,7 @@ def _build_training_frame(
         on="shift_id",
         how="inner",
     )
-    # Prevent leakage from events after shift start.
+    # Исключаем утечку: события после start_at смены
     merged_events = merged_events[merged_events["ts"] <= merged_events["start_at"]].copy()
 
     grouped = merged_events.groupby(["user_id", "shift_id"], as_index=False).agg(
@@ -288,22 +288,22 @@ def _generate_shap_plots(
 def run_training(cfg: TrainConfig) -> dict[str, object]:
     output_dir = Path(cfg.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    LOGGER.info("Stage 1/8: Loading and validating train CSV contracts")
+    LOGGER.info("Этап 1/8: Загрузка и валидация train CSV контрактов")
     users, shifts, events, checks = _load_and_validate_data(cfg)
     LOGGER.info(
-        "Loaded rows after cleanup: users=%s shifts=%s events=%s",
+        "Загружено строк после очистки: users=%s shifts=%s events=%s",
         len(users),
         len(shifts),
         len(events),
     )
 
-    LOGGER.info("Stage 2/8: Building training frame and target")
+    LOGGER.info("Этап 2/8: Формирование обучающей таблицы и таргета")
     frame = _build_training_frame(users, shifts, events)
-    LOGGER.info("Built training frame rows=%s", len(frame))
+    LOGGER.info("Сформировано строк в обучающей таблице=%s", len(frame))
 
-    LOGGER.info("Stage 3/8: Time split (~80/20) without leakage")
+    LOGGER.info("Этап 3/8: Временной сплит (~80/20) без утечек")
     train_frame, test_frame = _time_split(frame, cfg.test_ratio)
-    LOGGER.info("Split rows: train=%s test=%s", len(train_frame), len(test_frame))
+    LOGGER.info("Размеры сплита: train=%s test=%s", len(train_frame), len(test_frame))
 
     feature_columns = [
         "has_mk",
@@ -357,18 +357,17 @@ def run_training(cfg: TrainConfig) -> dict[str, object]:
         x_test[col] = x_test[col].astype(int)
     y_train = train_frame["target"].astype(int)
 
-    LOGGER.info("Stage 4/8: Feature list and sample preview")
-    LOGGER.info("Feature columns: %s", ", ".join(feature_columns))
-    LOGGER.info("Feature sample:\n%s", x_train.head(5).to_string(index=False))
+    LOGGER.info("Этап 4/8: Список признаков и пример")
+    LOGGER.info("Признаки: %s", ", ".join(feature_columns))
+    LOGGER.info("Пример строк:\n%s", x_train.head(5).to_string(index=False))
 
-    # """ EXTENSION POINT: swap baseline model/pipeline while keeping artifact contract stable. """
-    LOGGER.info("Stage 5/8: Fitting LogisticRegression baseline")
+    LOGGER.info("Этап 5/8: Обучение baseline LogisticRegression")
     pipeline = _build_pipeline(
         numeric_features, categorical_features, cfg.random_state, cfg.max_iter
     )
     pipeline.fit(x_train, y_train)
 
-    LOGGER.info("Stage 6/8: Running inference and calculating target metric")
+    LOGGER.info("Этап 6/8: Инференс и расчет целевой метрики")
     proba = pipeline.predict_proba(x_test)[:, 1]
     metric_df = test_frame[["shift_id", "start_at", "capacity", "target"]].copy()
     metric_df["score"] = proba
@@ -383,7 +382,7 @@ def run_training(cfg: TrainConfig) -> dict[str, object]:
         "train_rows": int(len(train_frame)),
     }
 
-    LOGGER.info("Stage 7/8: Saving model and artifacts to %s", output_dir)
+    LOGGER.info("Этап 7/8: Сохранение модели и артефактов в %s", output_dir)
     with (output_dir / "model.pkl").open("wb") as f:
         pickle.dump(pipeline, f)
     (output_dir / "metrics.json").write_text(
@@ -411,14 +410,14 @@ def run_training(cfg: TrainConfig) -> dict[str, object]:
     )
 
     report_lines = [
-        "# Train Report",
+        "# Отчет по обучению",
         "",
-        "## Data",
+        "## Данные",
         "",
         f"- train_rows: {len(train_frame):,}",
         f"- test_rows: {len(test_frame):,}",
         "",
-        "## Target metric (by regulation)",
+        "## Целевая метрика (по регламенту)",
         "",
         f"- target_metric: {metrics['target_metric']}",
         f"- evaluated_days: {metrics['evaluated_days']}",
@@ -428,7 +427,7 @@ def run_training(cfg: TrainConfig) -> dict[str, object]:
 
     shap_result: dict[str, str] = {}
     if cfg.skip_shap:
-        report_lines.extend(["", "## SHAP", "", "- SHAP skipped by config (--skip-shap)."])
+        report_lines.extend(["", "## SHAP", "", "- SHAP пропущен по флагу (--skip-shap)."])
     else:
         try:
             shap_result = _generate_shap_plots(
@@ -446,9 +445,9 @@ def run_training(cfg: TrainConfig) -> dict[str, object]:
         except Exception as exc:  # noqa: BLE001
             skip_path = output_dir / "plots" / "shap_skipped.txt"
             skip_path.parent.mkdir(parents=True, exist_ok=True)
-            skip_path.write_text(f"SHAP generation failed: {exc}", encoding="utf-8")
-            report_lines.extend(["", "## SHAP", "", f"- SHAP generation failed: {exc}"])
+            skip_path.write_text(f"Ошибка генерации SHAP: {exc}", encoding="utf-8")
+            report_lines.extend(["", "## SHAP", "", f"- Ошибка генерации SHAP: {exc}"])
 
     (output_dir / "train_report.md").write_text("\n".join(report_lines), encoding="utf-8")
-    LOGGER.info("Stage 8/8: Training pipeline finished successfully")
+    LOGGER.info("Этап 8/8: Pipeline обучения завершен успешно")
     return {"metrics": metrics, "shap": shap_result}

@@ -1,1 +1,1 @@
-"""Training package for baseline model."""
+"""Пакет обучения для baseline модели."""

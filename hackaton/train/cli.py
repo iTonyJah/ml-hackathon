@@ -59,7 +59,7 @@ def train_cmd(
         shap_sample_size=shap_sample_size,
     )
     result = run_training(cfg)
-    click.echo("Training finished successfully.")
+    click.echo("Обучение завершено успешно.")
     click.echo(json.dumps(result["metrics"], ensure_ascii=False, indent=2))
 
 
@@ -100,7 +100,7 @@ def cv_cmd(
         output_dir=str(output_dir),
     )
     click.echo(
-        f"CV finished. overall_metric={result.overall_metric:.4f}"
+        f"CV завершен. overall_metric={result.overall_metric:.4f}"
         f"  evaluated_days={result.evaluated_days}"
         f"  evaluated_shifts={result.evaluated_shifts}"
     )

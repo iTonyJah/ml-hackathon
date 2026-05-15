@@ -18,7 +18,7 @@ def _wait_health(client: ZeroClient, timeout_sec: int = 30) -> None:
         except Exception:  # noqa: BLE001
             pass
         if (time.perf_counter() - started) > timeout_sec:
-            raise TimeoutError("Service did not become healthy in time")
+            raise TimeoutError("Сервис не стал здоровым за отведенное время")
         time.sleep(0.5)
 
 
@@ -29,7 +29,7 @@ def _wait_ready(client: ZeroClient, timeout_sec: int = 30) -> None:
         if int(response.get("status_code", 500)) == 200 and bool(response.get("ready")):
             return
         if (time.perf_counter() - started) > timeout_sec:
-            raise TimeoutError("Service did not become ready in time")
+            raise TimeoutError("Сервис не перешел в ready за отведенное время")
         time.sleep(0.5)
 
 
@@ -93,7 +93,7 @@ def main() -> None:
         assert int(predict_response.get("status_code", 500)) == 200
         assert len(predict_response.get("user_ids", [])) > 0
 
-        print("CI RPC smoke passed: service started and predict returned candidates.")
+        print("CI RPC smoke пройден: сервис запущен, predict вернул кандидатов.")
     finally:
         client.close()
 

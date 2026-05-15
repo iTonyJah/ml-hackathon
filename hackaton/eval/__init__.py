@@ -1,1 +1,1 @@
-"""Evaluation utilities and metric implementations."""
+"""Утилиты оценки и реализации метрик."""

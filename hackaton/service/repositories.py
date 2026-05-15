@@ -1,5 +1,5 @@
 """
-Repository — работа с SQLite базой данных.
+Repository - работа с SQLite базой данных.
 Кандидаты для predict отбираются по активности (количеству событий).
 """
 
@@ -106,7 +106,7 @@ class Repository:
     ) -> list[str]:
         """
         Получаем кандидатов по локации и мед книжке.
-        Сортируем по количеству событий — активные пользователи важнее.
+        Сортируем по количеству событий - активные пользователи важнее.
         Активные пользователи с историей гораздо вероятнее выйдут на смену.
         """
         query = """
@@ -126,7 +126,7 @@ class Repository:
 
     async def fallback_candidates(self, limit: int) -> list[str]:
         """
-        Fallback — активные пользователи без фильтрации по локации.
+        Fallback - активные пользователи без фильтрации по локации.
         Используется когда в локации мало кандидатов.
         """
         query = """
@@ -150,7 +150,7 @@ class Repository:
         query = f"""
         SELECT id, location_id, is_strict_location, has_mk
         FROM users WHERE id IN ({placeholders})
-        """  # nosec
+        """ 
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(query, user_ids)
             rows = await cursor.fetchall()

@@ -15,7 +15,7 @@ LOGGER = logging.getLogger(__name__)
 
 class MLModel:
     FEATURE_NAMES = [
-        # User history features
+        # История пользователя
         "user_apply_rate",
         "user_finish_rate",
         "user_cancel_rate",
@@ -23,10 +23,10 @@ class MLModel:
         "user_total_views",
         "user_active_days",
         "user_has_mk",
-        # New: replaces useless user_is_strict_location (always False in dataset)
-        "user_location_applies",  # how many times user applied in this location
-        "user_task_type_applies",  # how many times user applied to this task_type
-        # Shift features
+        # Локация и тип задачи
+        "user_location_applies",
+        "user_task_type_applies",
+        # Признаки смены
         "shift_hour",
         "shift_dayofweek",
         "shift_hours",
@@ -34,19 +34,19 @@ class MLModel:
         "shift_capacity",
         "shift_need_mk",
         "shift_id_differential",
-        # Cross features
+        # Кросс-признаки
         "location_match",
         "mk_compatible",
         "user_worked_with_employer",
         "user_worked_at_workplace",
         "employer_avg_fill_rate",
         "user_reward_vs_avg",
-        # Recurring shift: how many times user applied to this exact shift before
+        # Повторяемые смены
         "user_shift_apply_count",
-        # Recurring shift outcome signals
+        # Исходы повторяемых смен
         "user_shift_finish_count",
         "user_shift_cancel_count",
-        # Recency: days from user's last apply to this shift to shift start (9999 if never applied)
+        # Давность отклика на ту же смену (дни; 9999 если не было)
         "user_shift_apply_recency_days",
     ]
 
@@ -58,16 +58,16 @@ class MLModel:
         self._scaler = None
         self._use_scaler = False
 
-        # Maps (user_id, shift_id) -> count of prior interactions (for recurring shifts)
+        # (user_id, shift_id) -> количество предыдущих взаимодействий
         self._apply_map: dict[tuple[str, str], int] = {}
         self._finish_map: dict[tuple[str, str], int] = {}
         self._cancel_map: dict[tuple[str, str], int] = {}
-        # (user_id, shift_id) -> unix timestamp (seconds) of most recent APPLY to this shift
+        # (user_id, shift_id) -> unix timestamp последнего APPLY по этой смене
         self._apply_ts_map: dict[tuple[str, str], float] = {}
-        # Users with 0 applies but ≥1 finish: workers whose applies predate training window
+        # Пользователи без APPLY, но с FINISHED (заявки до окна обучения)
         self._sleeper_set: set[str] = set()
 
-        # Vectorized inference cache — populated in build_inference_cache()
+        # Кэш для векторизованного inference
         self._inf_user_ids: list[str] = []
         self._inf_uid_to_idx: dict[str, int] = {}
         self._inf_apply_rates: np.ndarray = np.array([], dtype=np.float32)
@@ -87,7 +87,6 @@ class MLModel:
     def _build_user_stats(self, events: pd.DataFrame, shifts: pd.DataFrame) -> None:
         LOGGER.info("Building user stats from %d events", len(events))
 
-        # Include location_id and task_type for location/task_type apply tracking
         shift_cols = ["id", "employer_id", "workplace_id", "reward", "location_id", "task_type"]
         available = [c for c in shift_cols if c in shifts.columns]
         ev = events.merge(
@@ -106,20 +105,16 @@ class MLModel:
             n_views = len(views)
             n_total = len(group)
 
-            # Fix: count unique calendar days, not unique timestamps
+            # Число активных дней: по календарным датам
             if "ts" in group.columns and not group["ts"].isna().all():
                 ts_series = pd.to_datetime(group["ts"], utc=True, errors="coerce")
                 active_days = int(ts_series.dt.date.nunique())
             else:
                 active_days = 1
-
-            # Location-level apply counts: how often user applied in each location
             location_apply_counts: dict[str, int] = {}
             if "location_id" in applies.columns:
                 for loc in applies["location_id"].dropna().astype(str):
                     location_apply_counts[loc] = location_apply_counts.get(loc, 0) + 1
-
-            # Task-type apply counts
             task_type_apply_counts: dict[str, int] = {}
             if "task_type" in applies.columns:
                 for tt in applies["task_type"].dropna().astype(str):
@@ -144,7 +139,7 @@ class MLModel:
             employer_total = ev.groupby("employer_id").size()
             self._employer_stats = (employer_applies / employer_total.clip(lower=1)).to_dict()
 
-        # Build per-(user, shift) interaction counts for recurring shift features
+        # Счетчики взаимодействий для повторяющихся смен
         def _build_interaction_map(interaction: str) -> dict[tuple[str, str], int]:
             sub = events[events["interaction"] == interaction].copy()
             if sub.empty:
@@ -156,7 +151,7 @@ class MLModel:
         self._finish_map = _build_interaction_map("FINISHED")
         self._cancel_map = _build_interaction_map("USER_CANCEL")
 
-        # Most recent apply timestamp per (user, shift) for recency feature
+        # Временная метка последнего APPLY по (user, shift)
         applies_sub = events[events["interaction"] == "APPLY"].copy()
         if not applies_sub.empty and "ts" in applies_sub.columns:
             ts_parsed = pd.to_datetime(applies_sub["ts"], utc=True, errors="coerce")
@@ -184,7 +179,7 @@ class MLModel:
         )
 
     def build_inference_cache(self, users: pd.DataFrame) -> None:
-        """Precompute numpy arrays for vectorized batch inference (all users)."""
+        """Предвычисление numpy-массивов для batch inference (все пользователи)."""
         LOGGER.info("Building vectorized inference cache for %d users", len(users))
         user_ids = users["id"].astype(str).tolist()
         n = len(user_ids)
@@ -322,13 +317,13 @@ class MLModel:
             events[events["interaction"] == "SYSTEM_CANCEL"]["shift_id"].astype(str)
         )
 
-        # shift_id -> start_at for filtering post-start APPLY events
+        # shift_id -> start_at для фильтрации APPLY после начала смены
         shift_start_map: dict[str, pd.Timestamp] = {}
         if "start_at" in shifts.columns:
             starts = pd.to_datetime(shifts["start_at"], utc=True, errors="coerce")
             shift_start_map = dict(zip(shifts["id"].astype(str), starts))
 
-        # Positives: APPLY before shift.start_at, excluding SYSTEM_CANCEL shifts
+        # Позитивы: APPLY до start_at, исключая SYSTEM_CANCEL
         apply_events = events[
             (events["interaction"] == "APPLY")
             & (~events["shift_id"].astype(str).isin(sys_cancel_ids))
@@ -345,7 +340,7 @@ class MLModel:
 
         apply_pairs = set(zip(applies["user_id"].astype(str), applies["shift_id"].astype(str)))
 
-        # Negatives: VIEW and USER_CANCEL without subsequent APPLY (per requirements)
+        # Негативы: VIEW и USER_CANCEL без последующего APPLY
         neg_events = events[events["interaction"].isin(["VIEW", "USER_CANCEL"])][
             ["user_id", "shift_id"]
         ].drop_duplicates().copy()
@@ -445,11 +440,9 @@ class MLModel:
         shift_id: str,
         shift_start_secs: float,
     ) -> list[tuple[str, float]]:
-        """Re-rank by recency of last apply to this specific shift.
+        """Ранжирование по давности последнего APPLY на ту же смену.
 
-        Sort order: (no_prior_apply=0<1, days_since_apply ASC, ml_score DESC).
-        Users who applied most recently to this exact shift rank first.
-        Users with no prior apply rank after all prior-appliers.
+        Порядок: (есть_отклик=0<1, days_since_apply ASC, ml_score DESC).
         """
 
         def sort_key(item: tuple[str, float]) -> tuple[int, float, float]:
@@ -459,7 +452,6 @@ class MLModel:
                 days_ago = max(0.0, (shift_start_secs - last_ts) / 86400.0)
                 return (0, days_ago, -score)
             if uid in self._sleeper_set:
-                # Sleeping workers (0 applies, ≥1 finish): applies predate training window
                 finish_rate = self._user_stats.get(uid, {}).get("finish_rate", 0.0)
                 return (1, -finish_rate, -score)
             return (2, 0.0, -score)
@@ -477,11 +469,10 @@ class MLModel:
                 (uid, float(i) / max(1, len(user_ids))) for i, uid in enumerate(reversed(user_ids))
             ]
 
-        # Use vectorized inference cache if available
+        # Векторизованный путь, если кэш готов
         if self._inf_uid_to_idx:
             scored = self._predict_scores_vectorized(user_ids, shift_row)
         else:
-            # Fallback: per-user feature construction
             X_rows = [
                 self._make_features(str(uid), users_dict.get(str(uid), {}), shift_row)
                 for uid in user_ids
@@ -492,7 +483,6 @@ class MLModel:
             scores = self.model.predict_proba(X)[:, 1]
             scored = sorted(zip(user_ids, scores.tolist()), key=lambda x: x[1], reverse=True)
 
-        # Re-rank: users who applied most recently to this exact shift rank first
         shift_id = str(shift_row.get("id", ""))
         start_at = pd.to_datetime(shift_row.get("start_at"), utc=True, errors="coerce")
         if shift_id and start_at is not pd.NaT and self._apply_ts_map:
@@ -503,8 +493,7 @@ class MLModel:
     def _predict_scores_vectorized(
         self, user_ids: list[str], shift_row: dict
     ) -> list[tuple[str, float]]:
-        """Vectorized scoring using precomputed numpy arrays. Called for all users at once."""
-        # Precompute shift constants once
+        """Векторизованный scoring по заранее рассчитанным массивам."""
         start_at = pd.to_datetime(shift_row.get("start_at"), utc=True, errors="coerce")
         shift_hour = float(start_at.hour if start_at is not pd.NaT else 12)
         shift_dayofweek = float(start_at.dayofweek if start_at is not pd.NaT else 0)
@@ -524,7 +513,6 @@ class MLModel:
         uid_strs = [str(uid) for uid in user_ids]
         indices = [self._inf_uid_to_idx.get(uid, -1) for uid in uid_strs]
 
-        # Separate known from unknown users
         known = [(j, idx) for j, idx in enumerate(indices) if idx >= 0]
         unknown = [j for j, idx in enumerate(indices) if idx < 0]
 
@@ -535,7 +523,6 @@ class MLModel:
         vi = np.array([k[1] for k in known], dtype=np.int64)
         n_valid = len(vi)
 
-        # Vectorized user features
         col_apply_rate = self._inf_apply_rates[vi]
         col_finish_rate = self._inf_finish_rates[vi]
         col_cancel_rate = self._inf_cancel_rates[vi]
@@ -544,7 +531,7 @@ class MLModel:
         col_active_days = self._inf_active_days[vi]
         col_has_mk = self._inf_has_mk[vi]
 
-        # Location-based apply counts (still needs loop but over dicts)
+        # Подсчет APPLY по локации/типу задачи
         col_location_applies = np.array(
             [float(self._inf_location_apply_counts[i].get(shift_location, 0)) for i in vi],
             dtype=np.float32,
@@ -554,7 +541,7 @@ class MLModel:
             dtype=np.float32,
         )
 
-        # Shift features (broadcast)
+        # Признаки смены (broadcast)
         ones = np.ones(n_valid, dtype=np.float32)
         col_shift_hour = ones * shift_hour
         col_shift_dow = ones * shift_dayofweek
@@ -564,13 +551,13 @@ class MLModel:
         col_shift_need_mk = ones * shift_need_mk
         col_shift_id_diff = ones * shift_id_diff
 
-        # Cross features (vectorized)
+        # Кросс-признаки
         col_location_match = (self._inf_locations[vi] == shift_location).astype(np.float32)
         col_mk_compatible = np.logical_or(
             not shift_need_mk_val, self._inf_has_mk[vi].astype(bool)
         ).astype(np.float32)
 
-        # Set-based features (fast Python loops)
+        # Признаки по множествам
         col_worked_employer = np.array(
             [float(employer_id in self._inf_employer_sets[i]) for i in vi],
             dtype=np.float32,
@@ -581,7 +568,6 @@ class MLModel:
         )
 
         col_employer_fill_rate = ones * employer_fill_rate
-        # Users with no reward history get neutral ratio (1.0) not inflated (shift_reward/1.0)
         avg_rewards = self._inf_avg_rewards[vi]
         col_reward_vs_avg = np.where(
             avg_rewards > 0,

@@ -1,8 +1,8 @@
 """
-Time-based cross-validation for the ranking model.
+Time-based cross-validation для ранжирующей модели.
 
-Split: events/shifts before cutoff = train, after cutoff = validation.
-Replicates the production scoring pipeline without starting the RPC service.
+Разбиение: события/смены до cutoff = train, после cutoff = validation.
+Повторяет продакшн scoring без запуска RPC-сервиса.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from hackaton.service.ml_model import MLModel
 LOGGER = logging.getLogger(__name__)
 
 CANDIDATE_LIMIT = 300
-GLOBAL_FALLBACK_THRESHOLD = 50  # mirrors PrepareManager.get_candidates logic
+GLOBAL_FALLBACK_THRESHOLD = 50  # как в PrepareManager.get_candidates
 
 
 @dataclass
@@ -38,7 +38,7 @@ class CVResult:
 def _build_location_cache(
     users: pd.DataFrame, events: pd.DataFrame
 ) -> tuple[dict[str, list[str]], list[str]]:
-    """Replicate PrepareManager._build_cache: sorted by activity, no top-N cap."""
+    """Аналог PrepareManager._build_cache: сортировка по активности без top-N."""
     if not events.empty:
         activity = events.groupby("user_id").size().reset_index(name="n_events")
     else:
@@ -62,7 +62,7 @@ def _get_candidates(
     global_top: list[str],
     limit: int,
 ) -> list[str]:
-    """Mirrors PrepareManager.get_candidates."""
+    """Аналог PrepareManager.get_candidates."""
     loc = location_cache.get(str(location_id), [])
     if len(loc) < GLOBAL_FALLBACK_THRESHOLD:
         existing = set(loc)
@@ -81,7 +81,7 @@ def run_cv(
     candidate_limit: int = CANDIDATE_LIMIT,
     output_dir: str | None = None,
 ) -> CVResult:
-    LOGGER.info("Loading data...")
+    LOGGER.info("Загрузка данных...")
     users = pd.read_csv(user_path)
     shifts = pd.read_csv(shift_path)
     events = pd.read_csv(event_path)
@@ -91,14 +91,16 @@ def run_cv(
 
     max_ts = events["ts"].max()
     cutoff = max_ts - pd.Timedelta(days=val_days)
-    LOGGER.info("Cutoff: %s  (train < cutoff, val >= cutoff, val_days=%d)", cutoff.date(), val_days)
+    LOGGER.info(
+        "Граница: %s  (train < cutoff, val >= cutoff, val_days=%d)", cutoff.date(), val_days
+    )
 
     train_events = events[events["ts"] < cutoff].copy()
     val_events = events[events["ts"] >= cutoff].copy()
 
-    LOGGER.info("Split: train_events=%d  val_events=%d", len(train_events), len(val_events))
+    LOGGER.info("Разбиение: train_events=%d  val_events=%d", len(train_events), len(val_events))
 
-    # Ground truth for val: APPLY events in val window
+    # Ground truth: APPLY в окне валидации
     val_applies = (
         val_events[val_events["interaction"] == "APPLY"][["user_id", "shift_id"]]
         .drop_duplicates()
@@ -107,22 +109,21 @@ def run_cv(
     val_applies["user_id"] = val_applies["user_id"].astype(str)
     val_applies["shift_id"] = val_applies["shift_id"].astype(str)
 
-    # Val shifts: only those that have at least one APPLY in val window
+    # Val shifts: только смены с APPLY в окне валидации
     val_shift_ids = set(val_applies["shift_id"])
     val_shifts = shifts[shifts["id"].astype(str).isin(val_shift_ids)].copy()
     LOGGER.info("Val: apply_events=%d  unique_shifts=%d", len(val_applies), len(val_shift_ids))
 
-    LOGGER.info("Training model on pre-cutoff data...")
+    LOGGER.info("Обучаем модель на pre-cutoff данных...")
     model = MLModel()
     model.train(train_events, shifts, users)
     if not model.is_trained:
-        raise RuntimeError("Model failed to train — not enough pre-cutoff data")
+        raise RuntimeError("Модель не обучилась — недостаточно pre-cutoff данных")
     model.build_inference_cache(users)
-    LOGGER.info("Model trained. Building location cache...")
+    LOGGER.info("Модель обучена. Строим кэш локаций...")
 
     location_cache, global_top = _build_location_cache(users, train_events)
 
-    # Build users_cache for model.predict_scores
     users_cache = {
         str(r["id"]): {
             "id": str(r["id"]),
@@ -133,8 +134,7 @@ def run_cv(
         for _, r in users.iterrows()
     }
 
-    # Score val shifts
-    LOGGER.info("Scoring %d val shifts...", len(val_shifts))
+    LOGGER.info("Скорим %d val смен...", len(val_shifts))
     positive_pairs = {(r["user_id"], r["shift_id"]) for _, r in val_applies.iterrows()}
 
     rows: list[dict] = []
@@ -178,10 +178,10 @@ def run_cv(
             )
 
     if skipped:
-        LOGGER.warning("Skipped %d shifts (no candidates)", skipped)
+        LOGGER.warning("Пропущено %d смен (нет кандидатов)", skipped)
 
     if not rows:
-        LOGGER.error("No prediction rows built — check data")
+        LOGGER.error("Не удалось сформировать строки предсказаний — проверьте данные")
         return CVResult(
             overall_metric=0.0,
             evaluated_days=0,
@@ -197,7 +197,7 @@ def run_cv(
     metric: MetricResult = calculate_target_metric(frame)
 
     LOGGER.info(
-        "CV result: overall=%.4f  days=%d  shifts=%d",
+        "CV результат: overall=%.4f  days=%d  shifts=%d",
         metric.target_metric,
         metric.evaluated_days,
         metric.evaluated_shifts,
@@ -223,7 +223,7 @@ def run_cv(
 def _write_report(output_dir: Path, result: CVResult, val_days: int) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# Time-based CV Report",
+        "# Отчет по time-based CV",
         "",
         f"- cutoff_date: {result.cutoff_date}",
         f"- val_days: {val_days}",
@@ -232,16 +232,16 @@ def _write_report(output_dir: Path, result: CVResult, val_days: int) -> None:
         f"- val_events: {result.val_events:,}",
         f"- val_apply_shifts: {result.val_apply_shifts:,}",
         "",
-        "## Overall metric",
+        "## Итоговая метрика",
         "",
         f"- overall_target_metric: {result.overall_metric:.4f}",
         f"- evaluated_days: {result.evaluated_days}",
         f"- evaluated_shifts: {result.evaluated_shifts}",
         "",
-        "## Daily metrics",
+        "## Метрики по дням",
         "",
     ]
     for day, m in sorted(result.day_metrics.items()):
         lines.append(f"- {day}: {m:.4f}")
     (output_dir / "cv_report.md").write_text("\n".join(lines), encoding="utf-8")
-    LOGGER.info("CV report saved to %s", output_dir / "cv_report.md")
+    LOGGER.info("Отчет CV сохранен в %s", output_dir / "cv_report.md")

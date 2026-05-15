@@ -55,7 +55,9 @@ def _with_timing(callable_fn) -> tuple[dict, float]:
 def _ensure_ok(response: dict, endpoint: str) -> None:
     status_code = int(response.get("status_code", 200))
     if status_code >= 400:
-        raise RuntimeError(f"{endpoint} failed with status={status_code}, response={response}")
+        raise RuntimeError(
+            f"{endpoint}: ошибка status={status_code}, response={response}"
+        )
 
 
 def _to_uuid_string(raw: str) -> str:
@@ -169,7 +171,7 @@ def _run_prepare_and_wait(client: ZeroClient, timeout_sec: int, poll_interval_se
         if status_code == 200 and bool(ready.get("ready")):
             return time.perf_counter() - started
         if (time.perf_counter() - started) > timeout_sec:
-            raise TimeoutError(f"prepare/ready timeout exceeded: {timeout_sec}s")
+            raise TimeoutError(f"prepare/ready: превышен таймаут {timeout_sec}s")
         time.sleep(poll_interval_sec)
 
 
@@ -181,7 +183,7 @@ def _wait_until_ready_only(client: ZeroClient, timeout_sec: int, poll_interval_s
         if status_code == 200 and bool(ready.get("ready")):
             return time.perf_counter() - started
         if (time.perf_counter() - started) > timeout_sec:
-            raise TimeoutError(f"ready timeout exceeded: {timeout_sec}s")
+            raise TimeoutError(f"ready: превышен таймаут {timeout_sec}s")
         time.sleep(poll_interval_sec)
 
 
@@ -215,7 +217,7 @@ def _build_day_prediction_frame(
                 if attempt > cfg.predict_retry_on_not_ready:
                     _ensure_ok(response, "predict")
                 LOGGER.warning(
-                    "Predict returned 503 (model not ready), retry %s/%s",
+                    "predict вернул 503 (модель не готова), повтор %s/%s",
                     attempt,
                     cfg.predict_retry_on_not_ready,
                 )
@@ -259,16 +261,16 @@ def _build_day_prediction_frame(
 
 def run_evaluation(cfg: EvalConfig) -> dict[str, object]:
     if cfg.predict_max_rpm > 200:
-        raise ValueError("predict_max_rpm must be <= 200 to satisfy evaluation limits")
+        raise ValueError("predict_max_rpm должен быть <= 200 по регламенту")
     if cfg.predict_max_concurrency < 1:
-        raise ValueError("predict_max_concurrency must be >= 1")
+        raise ValueError("predict_max_concurrency должен быть >= 1")
 
     output_dir = Path(cfg.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    LOGGER.info("Stage 1/9: Loading evaluation datasets")
+    LOGGER.info("Этап 1/9: Загрузка данных для оценки")
     users, train_shifts, train_events, val_apply, val_shifts, val_events = _load_csvs(cfg)
 
-    LOGGER.info("Stage 2/9: Connecting to RPC service")
+    LOGGER.info("Этап 2/9: Подключение к RPC-сервису")
     client = ZeroClient(cfg.host, cfg.port, default_timeout=cfg.rpc_timeout_ms)
     stop_reason = ""
     day_reports: list[dict[str, object]] = []
@@ -276,39 +278,41 @@ def run_evaluation(cfg: EvalConfig) -> dict[str, object]:
     total_predict_wall_seconds = 0.0
     prepare_durations_sec: list[float] = []
     try:
-        LOGGER.info("Stage 3/9: Uploading bootstrap train data")
+        LOGGER.info("Этап 3/9: Загрузка стартовых train-данных")
         users_uploaded = _upload_users(client, users, cfg.batch_size)
         shifts_uploaded = _upload_shifts(client, train_shifts, cfg.batch_size)
         events_uploaded = _upload_events(client, train_events, cfg.batch_size)
 
-        LOGGER.info("Stage 4/9: Running initial prepare (<= %ss)", cfg.prepare_initial_timeout_sec)
+        LOGGER.info(
+            "Этап 4/9: Первичный prepare (<= %ss)", cfg.prepare_initial_timeout_sec
+        )
         prepare_initial_sec = _run_prepare_and_wait(
             client, cfg.prepare_initial_timeout_sec, cfg.poll_interval_sec
         )
         prepare_durations_sec.append(prepare_initial_sec)
 
         eval_days = sorted(d for d in val_apply["date"].dropna().unique())
-        LOGGER.info("Stage 5/9: Running day-by-day evaluation for %s days", len(eval_days))
+        LOGGER.info("Этап 5/9: По-дневная оценка для %s дней", len(eval_days))
 
         for day_idx, day in enumerate(eval_days, start=1):
             if not isinstance(day, date):
                 continue
             LOGGER.info(
-                "Day %s/%s: %s | building day slices", day_idx, len(eval_days), day.isoformat()
+                "День %s/%s: %s | формируем срезы", day_idx, len(eval_days), day.isoformat()
             )
             day_shifts = val_shifts[val_shifts["start_at"].dt.date == day].copy()
             day_apply = val_apply[val_apply["date"] == day].copy()
             if day_shifts.empty:
-                LOGGER.info("Day %s: skipped (no shifts)", day.isoformat())
+                LOGGER.info("День %s: пропущен (нет смен)", day.isoformat())
                 continue
 
-            LOGGER.info("Day %s: waiting service ready before prediction", day.isoformat())
+            LOGGER.info("День %s: ожидание ready перед предиктом", day.isoformat())
             _wait_until_ready_only(
                 client,
                 timeout_sec=cfg.prepare_day_timeout_sec,
                 poll_interval_sec=cfg.poll_interval_sec,
             )
-            LOGGER.info("Day %s: predicting candidates", day.isoformat())
+            LOGGER.info("День %s: предсказание кандидатов", day.isoformat())
             predict_started = time.perf_counter()
             prediction_frame, latencies_ms = _build_day_prediction_frame(
                 cfg,
@@ -322,14 +326,14 @@ def run_evaluation(cfg: EvalConfig) -> dict[str, object]:
             metric_result: MetricResult = calculate_target_metric(prediction_frame)
 
             day_events = val_events[val_events["ts"].dt.date == day].copy()
-            LOGGER.info("Day %s: waiting service ready before post-day uploads", day.isoformat())
+            LOGGER.info("День %s: ожидание ready перед пост-дневной загрузкой", day.isoformat())
             _wait_until_ready_only(
                 client,
                 timeout_sec=cfg.prepare_day_timeout_sec,
                 poll_interval_sec=cfg.poll_interval_sec,
             )
             LOGGER.info(
-                "Day %s: post-day upload shifts=%s events=%s",
+                "День %s: пост-дневная загрузка shifts=%s events=%s",
                 day.isoformat(),
                 len(day_shifts),
                 len(day_events),
@@ -340,7 +344,9 @@ def run_evaluation(cfg: EvalConfig) -> dict[str, object]:
             )
 
             LOGGER.info(
-                "Day %s: incremental prepare (<= %ss)", day.isoformat(), cfg.prepare_day_timeout_sec
+                "День %s: инкрементальный prepare (<= %ss)",
+                day.isoformat(),
+                cfg.prepare_day_timeout_sec,
             )
             prepare_day_sec = _run_prepare_and_wait(
                 client, cfg.prepare_day_timeout_sec, cfg.poll_interval_sec
@@ -366,7 +372,7 @@ def run_evaluation(cfg: EvalConfig) -> dict[str, object]:
                 }
             )
 
-        LOGGER.info("Stage 6/9: Aggregating final metric")
+        LOGGER.info("Этап 6/9: Агрегация итоговой метрики")
         overall_metric = (
             float(np.mean([d["target_metric"] for d in day_reports])) if day_reports else 0.0
         )
@@ -400,18 +406,18 @@ def run_evaluation(cfg: EvalConfig) -> dict[str, object]:
             "config": asdict(cfg),
         }
 
-        LOGGER.info("Stage 7/9: Writing evaluation report artifacts")
+        LOGGER.info("Этап 7/9: Запись артефактов отчета")
         _write_markdown_report(
             output_dir / "eval_report.md", summary, users, train_shifts, train_events
         )
-        LOGGER.info("Stage 8/9: Evaluation artifacts saved")
+        LOGGER.info("Этап 8/9: Артефакты оценки сохранены")
         return summary
     except Exception as exc:  # noqa: BLE001
         stop_reason = str(exc)
-        LOGGER.exception("Stage failed: %s", stop_reason)
+        LOGGER.exception("Ошибка этапа: %s", stop_reason)
         raise
     finally:
-        LOGGER.info("Stage 9/9: Closing RPC client")
+        LOGGER.info("Этап 9/9: Закрытие RPC-клиента")
         client.close()
 
 
@@ -424,20 +430,20 @@ def _write_markdown_report(
 ) -> None:
     perf = summary["performance"]
     lines = [
-        "# Eval Report",
+        "# Отчет по оценке",
         "",
-        "## Data stats at measurement",
+        "## Статистика данных на момент замера",
         "",
         f"- train_users: {len(users):,}",
         f"- train_shifts: {len(train_shifts):,}",
         f"- train_events: {len(train_events):,}",
         f"- days_evaluated: {summary['days_evaluated']}",
         "",
-        "## Overall target metric",
+        "## Итоговая целевая метрика",
         "",
         f"- overall_target_metric: {summary['overall_target_metric']}",
         "",
-        "## Performance",
+        "## Производительность",
         "",
         f"- predict_latency_p50_ms: {perf['predict_latency_p50_ms']:.3f}",
         f"- predict_latency_p80_ms: {perf['predict_latency_p80_ms']:.3f}",
@@ -448,7 +454,7 @@ def _write_markdown_report(
         "",
         f"- stop_reason: {summary['stop_reason']}",
         "",
-        "## Daily metrics",
+        "## Метрики по дням",
         "",
     ]
     for day in summary["day_reports"]:
@@ -468,7 +474,7 @@ def _write_markdown_report(
                 f"- day_event_upload_accepted: {day['day_event_upload_accepted']}",
                 f"- prepare_duration_sec: {day['prepare_duration_sec']:.1f}",
                 "",
-                "Group metrics:",
+                "Групповые метрики:",
                 "",
             ]
         )
@@ -476,6 +482,6 @@ def _write_markdown_report(
             for gm in day["group_metrics"]:
                 lines.append(f"- capacity={gm['capacity']}: {gm['group_metric']}")
         else:
-            lines.append("- no group metrics")
+            lines.append("- нет групповых метрик")
         lines.append("")
     report_path.write_text("\n".join(lines), encoding="utf-8")

@@ -16,13 +16,12 @@ import pandas as pd
 
 BASE_DIR = Path(__file__).parent
 DATA_DIR = BASE_DIR / "data"
-TRAIN_DIR = DATA_DIR / "new_train"
-VAL_DIR = DATA_DIR / "new_validation"
+TRAIN_DIR = DATA_DIR / "train"
+VAL_DIR = DATA_DIR / "validation"
 
-# Финальная оценка — на последних 1-2 неделях.
-# Новые данные заканчиваются ~2026-03-22, берём последние 2 недели как val.
-SPLIT_DATE = pd.Timestamp("2026-03-08", tz="UTC")
-SPLIT_DATE_PLAIN = datetime.date(2026, 3, 8)
+# Финальная оценка - на последних 1-2 неделях.
+# Берем последние 2 недели от максимальной даты смен в датасете.
+VAL_DAYS = 14
 
 
 def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -44,13 +43,16 @@ def load_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     return shifts, events, users
 
 
-def split_shifts(shifts: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+def split_shifts(
+    shifts: pd.DataFrame,
+    split_date: pd.Timestamp,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     # train: start_at <= T_split
     # val:   start_at >  T_split (т.е. в интервале (T_split, T_train])
-    train_shifts = shifts[shifts["start_at"] <= SPLIT_DATE].copy()
-    val_shifts = shifts[shifts["start_at"] > SPLIT_DATE].copy()
-    print(f"\nДата разбиения: {SPLIT_DATE.date()}")
-    print(f"  Train shifts: {len(train_shifts):,}  (до {SPLIT_DATE.date()} включительно)")
+    train_shifts = shifts[shifts["start_at"] <= split_date].copy()
+    val_shifts = shifts[shifts["start_at"] > split_date].copy()
+    print(f"\nДата разбиения: {split_date.date()}")
+    print(f"  Train shifts: {len(train_shifts):,}  (до {split_date.date()} включительно)")
     print(
         f"  Val shifts:   {len(val_shifts):,}  "
         f"({val_shifts['start_at'].min().date()} -> {val_shifts['start_at'].max().date()})"
@@ -61,15 +63,16 @@ def split_shifts(shifts: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 def split_events(
     events: pd.DataFrame,
     val_shifts: pd.DataFrame,
+    split_date: pd.Timestamp,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    # Train events — все события строго до даты разбиения (нет утечки из будущего)
-    train_events = events[events["ts"] <= SPLIT_DATE].copy()
+    # Train events - все события строго до даты разбиения (нет утечки из будущего)
+    train_events = events[events["ts"] <= split_date].copy()
 
-    # Val events — все события в валидационном периоде (по времени, не по shift_id).
+    # Val events - все события в валидационном периоде (по времени, не по shift_id).
     # Evaluator загружает их день за днём в incremental prepare.
     val_shift_ids = set(val_shifts["id"].astype(str))
     val_events = events[
-        (events["ts"] > SPLIT_DATE) & (events["shift_id"].astype(str).isin(val_shift_ids))
+        (events["ts"] > split_date) & (events["shift_id"].astype(str).isin(val_shift_ids))
     ].copy()
 
     print("\nСобытия:")
@@ -80,7 +83,7 @@ def split_events(
 
 def build_apply(events: pd.DataFrame, val_shifts: pd.DataFrame) -> pd.DataFrame:
     """
-    apply.csv — ground truth: пользователь реально подал заявку на смену.
+    apply.csv - ground truth: пользователь реально подал заявку на смену.
 
     Правила (требования хакатона):
     - Только смены из val-периода (start_at > T_split)
@@ -111,7 +114,7 @@ def build_apply(events: pd.DataFrame, val_shifts: pd.DataFrame) -> pd.DataFrame:
 
     apply_raw = apply_raw.drop_duplicates(subset=["user_id", "shift_id"])
 
-    # date = shift.start_at.date() — требование evaluator и хакатона
+    # date = shift.start_at.date() - требование evaluator и хакатона
     apply_raw["date"] = apply_raw["shift_start_at"].dt.date
     apply = apply_raw[["user_id", "shift_id", "date"]].copy()
 
@@ -129,10 +132,11 @@ def validate_split(
     val_shifts: pd.DataFrame,
     train_events: pd.DataFrame,
     events: pd.DataFrame,
+    split_date: pd.Timestamp,
 ) -> None:
     print("\nПроверка корректности сплита:")
 
-    # Все даты в apply >= минимальной даты val_shifts (граница — по времени, не по дате)
+    # Все даты в apply >= минимальной даты val_shifts (граница - по времени, не по дате)
     val_min_date = val_shifts["start_at"].min().date()
     val_max_date = val_shifts["start_at"].max().date()
     bad_dates = [d for d in apply["date"] if d < val_min_date]
@@ -172,7 +176,7 @@ def validate_split(
     )
 
     # Нет утечек из будущего в train_events
-    future_in_train = train_events[train_events["ts"] > SPLIT_DATE]
+    future_in_train = train_events[train_events["ts"] > split_date]
     if len(future_in_train) > 0:
         print(f"  [ОШИБКА] train_events содержит {len(future_in_train)} событий после split_date!")
     else:
@@ -220,10 +224,18 @@ def main() -> None:
     print("=" * 60)
 
     shifts, events, users = load_data()
-    train_shifts, val_shifts = split_shifts(shifts)
-    train_events, val_events = split_events(events, val_shifts)
+    max_shift = shifts["start_at"].max()
+    split_date = (max_shift - pd.Timedelta(days=VAL_DAYS)).normalize()
+    split_date_plain = split_date.date()
+    print(
+        f"\nДиапазон смен: {shifts['start_at'].min().date()} -> {max_shift.date()} | "
+        f"val = последние {VAL_DAYS} дней, split_date = {split_date_plain}"
+    )
+
+    train_shifts, val_shifts = split_shifts(shifts, split_date)
+    train_events, val_events = split_events(events, val_shifts, split_date)
     apply = build_apply(events, val_shifts)
-    validate_split(apply, val_shifts, train_events, events)
+    validate_split(apply, val_shifts, train_events, events, split_date)
     save_files(train_shifts, train_events, val_shifts, val_events, apply, users)
 
 

@@ -22,23 +22,21 @@ def _shift_metric_for_top_capacity(group: pd.DataFrame) -> float | None:
     if group.empty:
         return None
     capacity = int(max(1, group["capacity"].iloc[0]))
-    # Metric pool is fixed to TOP-10 candidates by regulation.
     pool = group.sort_values("score", ascending=False).head(METRIC_POOL_SIZE)
     top = pool.head(capacity)
     if top["target"].nunique() < 2:
         return None
-    # FPR cap depends on shift capacity relative to fixed metric pool size.
     max_fpr = min(1.0, capacity / METRIC_POOL_SIZE)
     return float(roc_auc_score(top["target"], top["score"], max_fpr=max_fpr))
 
 
 def calculate_target_metric(frame: pd.DataFrame) -> MetricResult:
     """
-    Target metric by regulation:
-    - Evaluate per shift on TOP-K candidates where K = shift capacity
-    - Candidate pool for metric is fixed to TOP-10
-    - Use ROC-AUC with FPR cap = min(1.0, capacity / 10)
-    - Aggregate by day and capacity groups, then average across days
+    Целевая метрика по регламенту:
+    - Для смены берется TOP-K, где K = capacity
+    - Пул кандидатов фиксирован: TOP-10
+    - ROC-AUC с ограничением FPR = min(1.0, capacity / 10)
+    - Агрегация по группам capacity и по дням, затем среднее по дням
     """
     required = {"shift_id", "start_at", "capacity", "target", "score"}
     missing = required - set(frame.columns)

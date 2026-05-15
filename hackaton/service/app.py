@@ -1,7 +1,7 @@
 """
 RPC сервис хакатона.
 predict() использует кэш активных пользователей + ML скоринг.
-Latency оптимизирована — нет тяжёлых SQL запросов при predict.
+Latency оптимизирована - нет тяжёлых SQL запросов при predict.
 """
 
 from __future__ import annotations
@@ -102,10 +102,10 @@ class HackatonRpcService:
             candidates = pm.get_candidates(
                 location_id=shift.location_id,
                 need_mk=shift.need_mk,
-                limit=300,  # топ-300 по активности — достаточно для recall, меньше шума
+                limit=300,  # топ-300 по активности - достаточно для recall, меньше шума
             )
 
-            # До первого prepare кэш пуст — fallback к DB (только при старте сервиса)
+            # До первого prepare кэш пуст - fallback к DB (только при старте сервиса)
             if not candidates:
                 candidates = await self.repository.find_top_candidates(
                     location_id=str(shift.location_id),
@@ -133,7 +133,7 @@ class HackatonRpcService:
                     "reward": shift.reward,
                     "capacity": shift.capacity,
                 }
-                # Используем кэш пользователей — нет обращений к БД
+                # Используем кэш пользователей - нет обращений к БД
                 scored = model.predict_scores(candidates, pm._users_cache, shift_dict)
                 top_candidates = [uid for uid, _ in scored[: request.limit]]
                 LOGGER.info(
@@ -144,7 +144,7 @@ class HackatonRpcService:
                     len(top_candidates),
                 )
             else:
-                # Fallback — просто топ активных
+                # Fallback - просто топ активных
                 top_candidates = candidates[: request.limit]
                 LOGGER.warning("predict: shift=%s model not trained, using activity rank", shift.id)
 

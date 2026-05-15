@@ -1,5 +1,5 @@
 """
-PrepareManager — обучает ML модель и кэширует активных пользователей по локациям.
+PrepareManager - обучает ML модель и кэширует активных пользователей по локациям.
 Кэш используется при predict для быстрого получения кандидатов без SQL JOIN.
 """
 
@@ -93,7 +93,7 @@ class PrepareManager:
             for _, row in users_with_activity.iterrows()
         }
 
-        # Кэш по локациям: ALL users (без ограничения — чтобы не пропустить аппликантов)
+        # Кэш по локациям: ALL users (без ограничения - чтобы не пропустить аппликантов)
         from collections import defaultdict
 
         location_cache: dict[str, list[str]] = defaultdict(list)
@@ -102,7 +102,7 @@ class PrepareManager:
 
         self._location_cache: dict[str, list[str]] = dict(location_cache)
 
-        # Глобальный топ — для cross-location кандидатов (fallback)
+        # Глобальный топ - для cross-location кандидатов (fallback)
         self._global_top = users_with_activity["id"].astype(str).tolist()
 
         LOGGER.info(
@@ -114,7 +114,7 @@ class PrepareManager:
     def get_candidates(self, location_id: str, need_mk: bool, limit: int) -> list[str]:
         """Возвращает кандидатов для предсказания.
 
-        Для больших локаций (≥50 пользователей) — только пользователи в локации.
+        Для больших локаций (≥50 пользователей) - только пользователи в локации.
         Это критически важно: кросс-локационные пользователи из global_top вытесняют
         реальных кандидатов с более высоким location_match-скором.
         Для маленьких локаций (<50) добавляем global fallback чтобы набрать пул.
@@ -122,12 +122,12 @@ class PrepareManager:
         loc_candidates = self._location_cache.get(str(location_id), [])
 
         if len(loc_candidates) < 50:
-            # Маленькая локация — добавляем глобальный топ как fallback
+            # Маленькая локация - добавляем глобальный топ как fallback
             existing = set(loc_candidates)
             extra = [u for u in self._global_top if u not in existing][:500]
             candidates = loc_candidates + extra
         else:
-            # Большая локация — только свои пользователи (без global шума)
+            # Большая локация - только свои пользователи (без global шума)
             candidates = loc_candidates
 
         return candidates[:limit]
@@ -136,7 +136,7 @@ class PrepareManager:
         try:
             LOGGER.info("PrepareManager: starting background prepare")
             if not self._db_path:
-                # No DB configured — sleep-only mode (used in tests)
+                # No DB configured - sleep-only mode (used in tests)
                 await asyncio.sleep(self._sleep_seconds)
                 self._state.ready = True
                 return

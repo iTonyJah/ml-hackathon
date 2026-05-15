@@ -1,4 +1,4 @@
-"""Tests for PrepareManager ML training path (with db_path)."""
+"""Тесты для пути обучения ML в PrepareManager (с db_path)."""
 
 from __future__ import annotations
 
@@ -87,7 +87,7 @@ def test_prepare_trains_ml_model(tmp_path: Path) -> None:
         assert (await service.ready(None))["ready"]
 
     asyncio.run(run_prepare())
-    assert service.prepare_manager.model.is_trained or True  # model trained if enough data
+    assert service.prepare_manager.model.is_trained or True  # Модель может не обучиться на таком маленьком датасете, но код пути должен отработать
 
 
 def test_predict_after_ml_prepare(tmp_path: Path) -> None:

@@ -92,10 +92,10 @@ def run_cmd(
     summary = run_evaluation(cfg)
     report_path = output_dir / "eval_report.md"
     perf = summary.get("performance", {})
-    click.echo("Evaluation finished successfully.")
-    click.echo(f"Report: {report_path}")
-    click.echo(f"Overall target metric: {summary.get('overall_target_metric', 0.0):.6f}")
-    click.echo(f"Days evaluated: {summary.get('days_evaluated', 0)}")
+    click.echo("Оценка завершена успешно.")
+    click.echo(f"Отчет: {report_path}")
+    click.echo(f"Итоговая метрика: {summary.get('overall_target_metric', 0.0):.6f}")
+    click.echo(f"Оценено дней: {summary.get('days_evaluated', 0)}")
     click.echo(f"predict_rpm: {float(perf.get('predict_rpm', 0.0)):.3f}")
 
 

@@ -34,7 +34,7 @@ def _wait_until_ready(client: ZeroClient, timeout_sec: int, poll_interval_sec: f
         if int(response.get("status_code", 200)) == 200 and bool(response.get("ready")):
             return
         if (time.perf_counter() - started) > timeout_sec:
-            raise TimeoutError(f"ready timeout exceeded: {timeout_sec}s")
+            raise TimeoutError(f"ready: превышен таймаут {timeout_sec}s")
         time.sleep(poll_interval_sec)
 
 
@@ -125,7 +125,7 @@ def run(host: str, port: int, requests: int, max_rpm: int, rpc_timeout_ms: int) 
 
 def _write_report(path: Path, result: LoadResult) -> None:
     lines = [
-        "# Predict load-test report",
+        "# Отчет нагрузочного теста predict",
         "",
         f"- p50_ms: {result.p50_ms:.3f}",
         f"- p80_ms: {result.p80_ms:.3f}",
@@ -139,7 +139,7 @@ def _write_report(path: Path, result: LoadResult) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Load test for predict RPC endpoint.")
+    parser = argparse.ArgumentParser(description="Нагрузочный тест RPC-метода predict.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--requests", type=int, default=100)
@@ -163,7 +163,7 @@ def main() -> None:
         rpc_timeout_ms=args.rpc_timeout_ms,
     )
     _write_report(args.report_path, result)
-    print("Load test result")
+    print("Результаты нагрузочного теста")
     print(f"p50: {result.p50_ms:.2f} ms")
     print(f"p80: {result.p80_ms:.2f} ms")
     print(f"p95: {result.p95_ms:.2f} ms")

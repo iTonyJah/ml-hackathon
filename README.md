@@ -22,12 +22,12 @@
 
 ## Навигация по документам
 
-- `README.md` — общий обзор, quickstart и команды.
-- `HOW-TO.md` — практический маршрут участника (куда и как вносить изменения).
-- `CHECKLIST.md` — checklist перед коммитом и MR.
-- `DATA.md` — форматы train/validation таблиц и примеры.
-- `REGLAMENT.md` — регламент валидации, метрика и запуск eval.
-- `TRAIN.md` — детали train-пайплайна и train-артефактов.
+- `README.md` - общий обзор, quickstart и команды.
+- `HOW-TO.md` - практический маршрут участника (куда и как вносить изменения).
+- `CHECKLIST.md` - checklist перед коммитом и MR.
+- `DATA.md` - форматы train/validation таблиц и примеры.
+- `REGLAMENT.md` - регламент валидации, метрика и запуск eval.
+- `TRAIN.md` - детали train-пайплайна и train-артефактов.
 
 ## Быстрый старт (time-to-first-run)
 
@@ -45,16 +45,16 @@ make test
 
 ## Где что лежит
 
-- `hackaton/service` — RPC-сервис, DTO, работа с БД, `prepare/ready/predict`.
-- `hackaton/train` — baseline обучение и сохранение train-артефактов.
-- `hackaton/eval` — дневной цикл оценки, расчет метрики, генерация `eval_report.md`.
-- `tests/unit`, `tests/e2e` — unit/e2e тесты.
-- `scripts/load_test.py` — нагрузочное тестирование `predict`.
-- `REGLAMENT.md` — официальный регламент оценки.
-- `DATA.md` — контракты данных с примерами.
-- `TRAIN.md` — детали train-модуля.
-- `HOW-TO.md` — практический гайд для участников (куда и как вносить изменения).
-- `CHECKLIST.md` — чеклист перед коммитом решения.
+- `hackaton/service` - RPC-сервис, DTO, работа с БД, `prepare/ready/predict`.
+- `hackaton/train` - baseline обучение и сохранение train-артефактов.
+- `hackaton/eval` - дневной цикл оценки, расчет метрики, генерация `eval_report.md`.
+- `tests/unit`, `tests/e2e` - unit/e2e тесты.
+- `scripts/load_test.py` - нагрузочное тестирование `predict`.
+- `REGLAMENT.md` - официальный регламент оценки.
+- `DATA.md` - контракты данных с примерами.
+- `TRAIN.md` - детали train-модуля.
+- `HOW-TO.md` - практический гайд для участников (куда и как вносить изменения).
+- `CHECKLIST.md` - чеклист перед коммитом решения.
 
 ## Запуск обучения
 
@@ -98,10 +98,10 @@ poetry run python -m hackaton.eval.cli run \
 
 ## Качество и проверка
 
-- `make test` — unit/e2e + coverage gate (`>=80%`).
-- `make precommit` — ruff + hooks + pytest.
-- `make load-test` — нагрузочный тест `predict` с markdown-отчетом.
-- `make compose-up` — запуск в Docker.
+- `make test` - unit/e2e + coverage gate (`>=80%`).
+- `make precommit` - ruff + hooks + pytest.
+- `make load-test` - нагрузочный тест `predict` с markdown-отчетом.
+- `make compose-up` - запуск в Docker.
 
 ## CI в GitHub
 

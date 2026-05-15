@@ -126,11 +126,11 @@ make precommit
 
 В `eval_report.md` смотрите:
 
-- `overall_target_metric` — итоговый score решения.
-- `predict_latency_p50/p80/p95` — задержки запросов `predict`.
-- `predict_rpm` — фактический темп запросов.
-- `prepare_duration_*` — цена подготовки модели.
-- `Daily metrics` — детализация качества по дням и группам `capacity`.
+- `overall_target_metric` - итоговый score решения.
+- `predict_latency_p50/p80/p95` - задержки запросов `predict`.
+- `predict_rpm` - фактический темп запросов.
+- `prepare_duration_*` - цена подготовки модели.
+- `Daily metrics` - детализация качества по дням и группам `capacity`.
 
 ## Частые проблемы и что делать
 
