@@ -15,6 +15,9 @@ make install
 # (заказчик и проверяющий копируют файлы в data/validation самостоятельно)
 poetry run python scripts/create_validation_split.py
 
+# или для быстроты val на последних двух днях
+poetry run python scripts/create_validation_split_2d.py
+
 # Создание базы данных
 make migrate
 
