@@ -66,13 +66,16 @@ class PrepareManager:
             events = pd.DataFrame([dict(r) for r in events_rows]) if events_rows else pd.DataFrame()
 
         LOGGER.info(
-            "Loaded from DB: users=%d, shifts=%d, events=%d", len(users), len(shifts), len(events)
+            "Загружено из БД: пользователей=%d, смен=%d, событий=%d",
+            len(users),
+            len(shifts),
+            len(events),
         )
         return users, shifts, events
 
     def _build_cache(self, users: pd.DataFrame, events: pd.DataFrame) -> None:
         """Строим кэш пользователей по локациям (без ограничения TOP-N)."""
-        LOGGER.info("Building user cache...")
+        LOGGER.info("Строим кэш пользователей...")
 
         if not events.empty:
             activity = events.groupby("user_id").size().reset_index(name="n_events")
@@ -106,7 +109,7 @@ class PrepareManager:
         self._global_top = users_with_activity["id"].astype(str).tolist()
 
         LOGGER.info(
-            "Cache built: %d locations, %d users total",
+            "Кэш построен: локаций=%d, пользователей=%d",
             len(self._location_cache),
             len(self._users_cache),
         )
@@ -134,16 +137,16 @@ class PrepareManager:
 
     async def _background_prepare(self) -> None:
         try:
-            LOGGER.info("PrepareManager: starting background prepare")
+            LOGGER.info("PrepareManager: запуск фонового prepare")
             if not self._db_path:
-                # No DB configured - sleep-only mode (used in tests)
+                # БД не настроена - режим только sleep (используется в тестах)
                 await asyncio.sleep(self._sleep_seconds)
                 self._state.ready = True
                 return
             users, shifts, events = await self._load_data()
 
             if users.empty:
-                LOGGER.warning("No users loaded, skipping prepare")
+                LOGGER.warning("Пользователи не загружены, пропускаем prepare")
                 self._state.ready = True
                 return
 
@@ -166,13 +169,16 @@ class PrepareManager:
 
                 await loop.run_in_executor(None, _train_and_cache)
             else:
-                LOGGER.warning("Not enough data to train model")
+                LOGGER.warning("Недостаточно данных для обучения модели")
 
-            LOGGER.info("PrepareManager: prepare complete, model ready=%s", self.model.is_trained)
+            LOGGER.info(
+                "PrepareManager: prepare завершен, модель готова=%s",
+                self.model.is_trained,
+            )
             self._state.ready = True
 
         except Exception as exc:
-            LOGGER.exception("PrepareManager: prepare failed: %s", exc)
+            LOGGER.exception("PrepareManager: prepare завершился ошибкой: %s", exc)
             self._state.ready = True
         finally:
             self._state.running = False

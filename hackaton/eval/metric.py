@@ -41,7 +41,7 @@ def calculate_target_metric(frame: pd.DataFrame) -> MetricResult:
     required = {"shift_id", "start_at", "capacity", "target", "score"}
     missing = required - set(frame.columns)
     if missing:
-        raise ValueError(f"Metric frame missing columns: {sorted(missing)}")
+        raise ValueError(f"В таблице метрики отсутствуют колонки: {sorted(missing)}")
 
     data = frame.copy()
     data["start_at"] = pd.to_datetime(data["start_at"], utc=True, errors="coerce")

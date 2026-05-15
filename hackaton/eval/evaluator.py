@@ -108,7 +108,11 @@ def _upload_users(client: ZeroClient, users: pd.DataFrame, batch_size: int) -> i
         response = client.call("user", payload)
         _ensure_ok(response, "user")
         accepted_total += int(response.get("accepted", 0))
-        LOGGER.info("Uploaded users batch %s, accepted=%s", idx, response.get("accepted", 0))
+        LOGGER.info(
+            "Загружен пакет пользователей %s, принято=%s",
+            idx,
+            response.get("accepted", 0),
+        )
     return accepted_total
 
 
@@ -135,7 +139,11 @@ def _upload_shifts(client: ZeroClient, shifts: pd.DataFrame, batch_size: int) ->
         response = client.call("shift", payload)
         _ensure_ok(response, "shift")
         accepted_total += int(response.get("accepted", 0))
-        LOGGER.info("Uploaded shifts batch %s, accepted=%s", idx, response.get("accepted", 0))
+        LOGGER.info(
+            "Загружен пакет смен %s, принято=%s",
+            idx,
+            response.get("accepted", 0),
+        )
     return accepted_total
 
 
@@ -157,7 +165,11 @@ def _upload_events(client: ZeroClient, events: pd.DataFrame, batch_size: int) ->
         response = client.call("event", payload)
         _ensure_ok(response, "event")
         accepted_total += int(response.get("accepted", 0))
-        LOGGER.info("Uploaded events batch %s, accepted=%s", idx, response.get("accepted", 0))
+        LOGGER.info(
+            "Загружен пакет событий %s, принято=%s",
+            idx,
+            response.get("accepted", 0),
+        )
     return accepted_total
 
 

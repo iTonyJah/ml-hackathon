@@ -34,7 +34,7 @@ class HackatonRpcService:
         REQUEST_COUNT.labels("user").inc()
         with REQUEST_LATENCY.labels("user").time():
             request = BatchUsersRequest.model_validate(payload)
-            LOGGER.info("RPC user called, batch_size=%s", len(request.items))
+            LOGGER.info("RPC user: batch_size=%s", len(request.items))
             accepted = await self.repository.upsert_users(request.items)
             return {"accepted": accepted}
 
@@ -47,7 +47,7 @@ class HackatonRpcService:
         REQUEST_COUNT.labels("event").inc()
         with REQUEST_LATENCY.labels("event").time():
             request = BatchEventsRequest.model_validate(payload)
-            LOGGER.info("RPC event called, batch_size=%s", len(request.items))
+            LOGGER.info("RPC event: batch_size=%s", len(request.items))
             accepted = await self.repository.insert_events(request.items)
             return {"accepted": accepted}
 
@@ -60,7 +60,7 @@ class HackatonRpcService:
         REQUEST_COUNT.labels("shift").inc()
         with REQUEST_LATENCY.labels("shift").time():
             request = BatchShiftsRequest.model_validate(payload)
-            LOGGER.info("RPC shift called, batch_size=%s", len(request.items))
+            LOGGER.info("RPC shift: batch_size=%s", len(request.items))
             accepted = await self.repository.upsert_shifts(request.items)
             return {"accepted": accepted}
 
@@ -72,7 +72,7 @@ class HackatonRpcService:
     async def prepare(self, _: dict | None = None) -> dict:
         REQUEST_COUNT.labels("prepare").inc()
         with REQUEST_LATENCY.labels("prepare").time():
-            LOGGER.info("RPC prepare called")
+            LOGGER.info("RPC prepare: вызван")
             started = await self.prepare_manager.start()
             if not started:
                 return {"status": "already_running", "status_code": 409}
@@ -89,7 +89,7 @@ class HackatonRpcService:
         REQUEST_COUNT.labels("predict").inc()
         with REQUEST_LATENCY.labels("predict").time():
             if not self.prepare_manager.ready:
-                return {"user_ids": [], "status_code": 503, "detail": "model is in prepare state"}
+                return {"user_ids": [], "status_code": 503, "detail": "модель в состоянии prepare"}
             try:
                 request = PredictRequest.model_validate(payload)
             except ValidationError as exc:
@@ -115,7 +115,7 @@ class HackatonRpcService:
             if not candidates:
                 candidates = await self.repository.fallback_candidates(limit=request.limit)
             if not candidates:
-                return {"user_ids": [], "status_code": 400, "detail": "no users loaded"}
+                return {"user_ids": [], "status_code": 400, "detail": "пользователи не загружены"}
 
             # Шаг 2: скорим ML моделью используя кэш данных пользователей
             model = pm.model
@@ -137,7 +137,7 @@ class HackatonRpcService:
                 scored = model.predict_scores(candidates, pm._users_cache, shift_dict)
                 top_candidates = [uid for uid, _ in scored[: request.limit]]
                 LOGGER.info(
-                    "predict: shift=%s loc=%s pool=%d top=%d model=trained",
+                    "predict итог: shift=%s loc=%s pool=%d top=%d model=trained",
                     shift.id,
                     shift.location_id,
                     len(candidates),
@@ -146,7 +146,10 @@ class HackatonRpcService:
             else:
                 # Fallback - просто топ активных
                 top_candidates = candidates[: request.limit]
-                LOGGER.warning("predict: shift=%s model not trained, using activity rank", shift.id)
+                LOGGER.warning(
+                    "predict: shift=%s модель не обучена, используем ранжирование по активности",
+                    shift.id,
+                )
 
             return {"user_ids": top_candidates, "status_code": 200}
 

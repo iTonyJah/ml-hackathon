@@ -114,11 +114,11 @@ def run_cv(
     val_shifts = shifts[shifts["id"].astype(str).isin(val_shift_ids)].copy()
     LOGGER.info("Val: apply_events=%d  unique_shifts=%d", len(val_applies), len(val_shift_ids))
 
-    LOGGER.info("Обучаем модель на pre-cutoff данных...")
+    LOGGER.info("Обучаем модель на данных pre-cutoff...")
     model = MLModel()
     model.train(train_events, shifts, users)
     if not model.is_trained:
-        raise RuntimeError("Модель не обучилась — недостаточно pre-cutoff данных")
+        raise RuntimeError("Модель не обучилась — недостаточно данных pre-cutoff")
     model.build_inference_cache(users)
     LOGGER.info("Модель обучена. Строим кэш локаций...")
 

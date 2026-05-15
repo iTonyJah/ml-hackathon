@@ -66,7 +66,7 @@ def _to_bool(series: pd.Series) -> pd.Series:
 def _validate_columns(df: pd.DataFrame, required: list[str], name: str) -> dict[str, object]:
     missing = [c for c in required if c not in df.columns]
     if missing:
-        raise ValueError(f"{name}: missing required columns: {missing}")
+        raise ValueError(f"{name}: отсутствуют обязательные колонки: {missing}")
     null_counts = {c: int(df[c].isna().sum()) for c in required}
     return {
         "rows": int(len(df)),
@@ -203,17 +203,17 @@ def _build_training_frame(
 
 def _time_split(frame: pd.DataFrame, test_ratio: float) -> tuple[pd.DataFrame, pd.DataFrame]:
     if frame.empty:
-        raise ValueError("Training frame is empty after preprocessing.")
+        raise ValueError("Обучающая таблица пустая после предобработки.")
     unique_ts = np.array(sorted(frame["start_at"].dropna().unique()))
     if unique_ts.size < 2:
-        raise ValueError("Not enough temporal points for 80/20 split.")
+        raise ValueError("Недостаточно временных точек для сплита 80/20.")
     split_idx = max(1, int(unique_ts.size * (1 - test_ratio)))
     split_idx = min(split_idx, unique_ts.size - 1)
     split_border = unique_ts[split_idx]
     train = frame[frame["start_at"] < split_border].copy()
     test = frame[frame["start_at"] >= split_border].copy()
     if train.empty or test.empty:
-        raise ValueError("Time split produced empty train or test set.")
+        raise ValueError("Временной сплит дал пустой train или test набор.")
     return train, test
 
 
@@ -327,7 +327,7 @@ def run_training(cfg: TrainConfig) -> dict[str, object]:
     ]
     missing = [c for c in feature_columns if c not in frame.columns]
     if missing:
-        raise ValueError(f"Missing feature columns after preprocessing: {missing}")
+        raise ValueError(f"После предобработки отсутствуют признаки: {missing}")
 
     numeric_features = [
         "hours",

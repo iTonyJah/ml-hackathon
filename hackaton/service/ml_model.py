@@ -85,7 +85,7 @@ class MLModel:
         self._inf_task_type_apply_counts: list[dict] = []
 
     def _build_user_stats(self, events: pd.DataFrame, shifts: pd.DataFrame) -> None:
-        LOGGER.info("Building user stats from %d events", len(events))
+        LOGGER.info("Строим статистику пользователей из %d событий", len(events))
 
         shift_cols = ["id", "employer_id", "workplace_id", "reward", "location_id", "task_type"]
         available = [c for c in shift_cols if c in shifts.columns]
@@ -171,7 +171,7 @@ class MLModel:
             if stats.get("total_applies", 0) == 0 and stats.get("finish_rate", 0.0) > 0.0
         }
         LOGGER.info(
-            "Built stats for %d users, %d employers, %d shift-apply pairs, %d sleepers",
+            "Статистика: users=%d employers=%d shift_apply_pairs=%d sleepers=%d",
             len(self._user_stats),
             len(self._employer_stats),
             len(self._apply_map),
@@ -180,7 +180,7 @@ class MLModel:
 
     def build_inference_cache(self, users: pd.DataFrame) -> None:
         """Предвычисление numpy-массивов для batch inference (все пользователи)."""
-        LOGGER.info("Building vectorized inference cache for %d users", len(users))
+        LOGGER.info("Строим векторизованный кэш inference для users=%d", len(users))
         user_ids = users["id"].astype(str).tolist()
         n = len(user_ids)
 
@@ -236,7 +236,7 @@ class MLModel:
         self._inf_location_apply_counts = loc_apply_counts
         self._inf_task_type_apply_counts = tt_apply_counts
 
-        LOGGER.info("Inference cache ready: %d users", n)
+        LOGGER.info("Кэш inference готов: users=%d", n)
 
     def _make_features(self, user_id: str, user_row: dict, shift_row: dict) -> list[float]:
         stats = self._user_stats.get(str(user_id), {})
@@ -351,7 +351,7 @@ class MLModel:
         negatives["label"] = 0
         negatives = negatives.sample(n=min(len(negatives), len(applies) * 5), random_state=42)
 
-        LOGGER.info("Training data: pos=%d, neg=%d", len(applies), len(negatives))
+        LOGGER.info("Данные обучения: pos=%d, neg=%d", len(applies), len(negatives))
         data = pd.concat([applies, negatives], ignore_index=True)
 
         users_dict = {str(r["id"]): r.to_dict() for _, r in users.iterrows()}
@@ -375,7 +375,7 @@ class MLModel:
 
             X, y = self._build_training_data(events, shifts, users)
             if len(X) == 0:
-                LOGGER.warning("No training data, skipping")
+                LOGGER.warning("Нет данных для обучения, пропускаем")
                 return
 
             from sklearn.model_selection import train_test_split
@@ -409,7 +409,7 @@ class MLModel:
             )
             self._use_scaler = False
             LOGGER.info(
-                "LGBMClassifier trained: samples=%d best_iter=%d val_auc=%.4f",
+                "LGBMClassifier обучен: samples=%d best_iter=%d val_auc=%.4f",
                 len(X),
                 self.model.best_iteration_,
                 list(self.model.best_score_["valid_0"].values())[0],
@@ -421,7 +421,7 @@ class MLModel:
 
             X_fb, y_fb = self._build_training_data(events, shifts, users)
             if len(X_fb) == 0:
-                LOGGER.warning("No training data, skipping")
+                LOGGER.warning("Нет данных для обучения, пропускаем")
                 return
             self._scaler = StandardScaler()
             X_scaled = self._scaler.fit_transform(X_fb)
@@ -430,7 +430,7 @@ class MLModel:
             )
             self.model.fit(X_scaled, y_fb)
             self._use_scaler = True
-            LOGGER.info("LogisticRegression trained, samples=%d", len(X_fb))
+            LOGGER.info("LogisticRegression обучен, samples=%d", len(X_fb))
 
         self.is_trained = True
 

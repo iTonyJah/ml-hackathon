@@ -91,7 +91,7 @@ class Repository:
 
     async def count_table(self, table_name: str) -> int:
         if table_name not in {"users", "events", "shifts"}:
-            raise ValueError(f"unsupported table: {table_name}")
+            raise ValueError(f"неподдерживаемая таблица: {table_name}")
         query = f"SELECT COUNT(1) FROM {table_name}"  # nosec
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(query)
