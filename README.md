@@ -1,73 +1,111 @@
-# Базовое решение для ML-хакатона
+# ML-хакатон: ранжирование кандидатов на смены
 
-Репозиторий содержит baseline-реализацию сервиса под задачу ранжирования кандидатов на смены:
+Репозиторий содержит сервис для ранжирования работников под смены. Сервис получает пользователей, смены и события, готовит модель и по запросу `predict` возвращает список кандидатов в порядке ожидаемой релевантности.
 
-- API-сервис на `zero` (TCP RPC);
-- baseline train-пайплайн;
-- eval-пайплайн с дневной симуляцией и расчетом целевой метрики;
-- инфраструктура проверки качества (tests, coverage gate, pre-commit, load-test).
+Финальная версия решения построена вокруг:
 
-## Общий процесс участия
+- RPC-сервиса на `zero`;
+- SQLite-хранилища входных данных;
+- `PrepareManager`, который обучает модель и строит кэши;
+- `MLModel` на `LightGBM`;
+- быстрого in-memory inference в `predict`;
+- дополнительного sleeper-rerank для работников с `FINISHED`, но без видимых `APPLY`;
+- time-based CV для более надежной внутренней оценки.
 
-Участники проходят следующий сценарий:
+## С чего начать
 
-1. Получают доступ к репозиторию и клонируют кодовую базу.
-1. Изучают контракты API, инструкции запуска и автотесты.
-1. Получают train/validation данные в CSV-формате.
-1. Обучают собственную модель и готовят решение.
-1. Интегрируют модель/алгоритмы в сервис, не нарушая контракты.
-1. Запускают тесты, eval и нагрузочные проверки.
-1. Оформляют Merge Request в своей ветке.
-1. После дедлайна организаторы фиксируют изменения и оценивают качество.
+Если нужно понять проект как систему, лучше читать в таком порядке:
 
-## Навигация по документам
+1. `docs/FINAL_REPORT.md` - общий итоговый отчет.
+2. `docs/ARCHITECTURE_OVERVIEW.md` - как устроен сервис.
+3. `docs/METRICS_AND_EXPERIMENTS.md` - метрика, эксперименты и результаты.
+4. `docs/DEVELOPMENT_STORY.md` - что делали и как пришли к решению.
+5. `docs/REPRODUCIBILITY.md` - как воспроизвести запуск.
 
-- `README.md` — общий обзор, quickstart и команды.
-- `HOW-TO.md` — практический маршрут участника (куда и как вносить изменения).
-- `CHECKLIST.md` — checklist перед коммитом и MR.
-- `DATA.md` — форматы train/validation таблиц и примеры.
-- `REGLAMENT.md` — регламент валидации, метрика и запуск eval.
-- `TRAIN.md` — детали train-пайплайна и train-артефактов.
+Корневые документы:
 
-## Быстрый старт (time-to-first-run)
+- `DATA.md` - формат входных CSV.
+- `REGLAMENT.md` - правила eval и целевой метрики.
+- `TRAIN.md` - обучение, ML-путь и CV.
+- `HOW-TO.md` - практические команды.
+- `CHECKLIST.md` - проверка перед сдачей.
+
+## Быстрый запуск
+
+Установить зависимости:
 
 ```bash
 make install
+```
+
+Создать базу:
+
+```bash
 make migrate
+```
+
+Запустить сервис:
+
+```bash
 make run
 ```
 
-В отдельном терминале:
+В другом терминале можно запустить тесты:
 
 ```bash
 make test
 ```
 
-## Где что лежит
+## Подготовка validation split
 
-- `hackaton/service` — RPC-сервис, DTO, работа с БД, `prepare/ready/predict`.
-- `hackaton/train` — baseline обучение и сохранение train-артефактов.
-- `hackaton/eval` — дневной цикл оценки, расчет метрики, генерация `eval_report.md`.
-- `tests/unit`, `tests/e2e` — unit/e2e тесты.
-- `scripts/load_test.py` — нагрузочное тестирование `predict`.
-- `REGLAMENT.md` — официальный регламент оценки.
-- `DATA.md` — контракты данных с примерами.
-- `TRAIN.md` — детали train-модуля.
-- `HOW-TO.md` — практический гайд для участников (куда и как вносить изменения).
-- `CHECKLIST.md` — чеклист перед коммитом решения.
+Если validation-файлы уже выданы отдельно, этот шаг не нужен.
 
-## Запуск обучения
+Если нужно сделать локальный split из train-данных:
 
 ```bash
-poetry run python -m hackaton.train.cli train \
-  --user-path data/train/user.csv \
-  --shift-path data/train/shift.csv \
-  --event-path data/train/event.csv \
-  --output-dir artifacts/train \
-  --skip-shap
+poetry run python scripts/create_validation_split.py
 ```
 
-## Запуск оценки
+Для быстрого прогона на последних двух днях:
+
+```bash
+poetry run python scripts/create_validation_split_2d.py
+```
+
+После split появятся:
+
+```text
+data/train/shift_train.csv
+data/train/event_train.csv
+data/validation/apply.csv
+data/validation/shift.csv
+data/validation/event.csv
+```
+
+## Запуск eval
+
+Eval требует уже запущенный сервис.
+
+Для локального split:
+
+```bash
+poetry run python -m hackaton.eval.cli run \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --user-path data/train/user.csv \
+  --shift-path data/train/shift_train.csv \
+  --event-path data/train/event_train.csv \
+  --val-apply-path data/validation/apply.csv \
+  --val-shift-path data/validation/shift.csv \
+  --val-event-path data/validation/event.csv \
+  --output-dir artifacts/eval_run \
+  --limit 10 \
+  --batch-size 1000 \
+  --predict-max-concurrency 4 \
+  --predict-max-rpm 200
+```
+
+Для готового train/validation набора:
 
 ```bash
 poetry run python -m hackaton.eval.cli run \
@@ -80,40 +118,76 @@ poetry run python -m hackaton.eval.cli run \
   --val-shift-path data/validation/shift.csv \
   --val-event-path data/validation/event.csv \
   --output-dir artifacts/eval_run \
+  --limit 10 \
+  --batch-size 1000 \
   --predict-max-concurrency 4 \
   --predict-max-rpm 200
 ```
 
-Артефакт оценки: `artifacts/eval_run/eval_report.md`.
+Отчет будет сохранен в:
 
-## Целевая метрика (кратко)
+```text
+artifacts/eval_run/eval_report.md
+```
 
-- Пул кандидатов для метрики фиксирован: `pool_size = 10`.
-- Ограничение FPR: `max_fpr = min(1.0, capacity / 10)`.
-- Агрегация: по группам емкости внутри дня, затем среднее по дням.
+## Запуск time-based CV
 
-Полные правила: `REGLAMENT.md`.
+CV запускается без RPC-сервиса:
 
-Форматы данных и примеры: `DATA.md`.
+```bash
+poetry run python -m hackaton.train.cli cv \
+  --user-path data/train/user.csv \
+  --shift-path data/train/shift_train.csv \
+  --event-path data/train/event_train.csv \
+  --output-dir artifacts/cv_run \
+  --val-days 30 \
+  --candidate-limit 300
+```
 
-## Качество и проверка
+Отчет:
 
-- `make test` — unit/e2e + coverage gate (`>=80%`).
-- `make precommit` — ruff + hooks + pytest.
-- `make load-test` — нагрузочный тест `predict` с markdown-отчетом.
-- `make compose-up` — запуск в Docker.
+```text
+artifacts/cv_run/cv_report.md
+```
 
-## CI в GitHub
+## Где что лежит
 
-В репозитории настроены workflow:
+- `hackaton/service/app.py` - RPC-методы, включая `predict`.
+- `hackaton/service/prepare_manager.py` - загрузка данных, обучение модели, кэши.
+- `hackaton/service/ml_model.py` - признаки, LightGBM, скоринг и rerank.
+- `hackaton/service/repositories.py` - работа с SQLite.
+- `hackaton/eval` - локальный eval-пайплайн и метрика.
+- `hackaton/train/cv.py` - time-based cross-validation.
+- `scripts/create_validation_split.py` - основной локальный validation split.
+- `scripts/create_validation_split_2d.py` - быстрый validation split.
+- `tests/unit`, `tests/e2e` - тесты.
 
-- `.github/workflows/ci.yml`:
-  - lint + pytest + coverage;
-  - запуск сервиса;
-  - RPC smoke-check (`user/shift/event -> prepare/ready -> predict`), где проверяется, что для смены подбираются исполнители.
-- `.github/workflows/load-test.yml`:
-  - ручной и nightly запуск нагрузочного сценария;
-  - проверка budget (`failed_calls == 0`, `p95 <= 1000ms`);
-  - публикация markdown-отчета нагрузочного теста как artifact.
+## Целевая метрика
 
-Merge должен проходить только при зеленых CI-проверках.
+Качество считается по ранжированию TOP-10 кандидатов.
+
+Ключевые правила:
+
+- фиксированный пул кандидатов: `pool_size = 10`;
+- ограничение FPR: `max_fpr = min(1.0, capacity / 10)`;
+- агрегация: смена -> группа `capacity` внутри дня -> день -> итог.
+
+Подробнее: `REGLAMENT.md` и `docs/METRICS_AND_EXPERIMENTS.md`.
+
+## Проверка качества
+
+```bash
+make test
+make precommit
+make load-test
+```
+
+Перед сдачей важно проверить:
+
+- сервис стартует;
+- данные загружаются;
+- `prepare` завершается;
+- `ready` возвращает готовность;
+- `predict` возвращает непустой список;
+- `eval_report.md` формируется;
+- тесты проходят.

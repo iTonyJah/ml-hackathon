@@ -1,56 +1,85 @@
-# HOW-TO для участников
+# HOW-TO: как работать с финальным решением
 
-## Цель документа
+Этот документ помогает быстро запустить проект, проверить качество и понять, где находится основная логика решения.
 
-Этот файл помогает быстро понять:
+Если нужен максимально строгий сценарий воспроизводимости, используйте `docs/REPRODUCIBILITY.md`.
 
-- где в проекте вносить изменения;
-- как локально проверить, что решение корректное;
-- как интерпретировать итог оценки.
+## Минимальный маршрут
 
-## Минимальный маршрут участника
-
-### Поднять сервис
+Установить зависимости:
 
 ```bash
 make install
+```
+
+Создать базу:
+
+```bash
 make migrate
+```
+
+Запустить сервис:
+
+```bash
 make run
 ```
 
-### Проверить качество кода
+В отдельном терминале проверить тесты:
 
 ```bash
 make test
-make precommit
 ```
 
-### Проверить, что CI пройдет
+## Подготовить validation split
 
-- Убедитесь, что локально зеленые `make test` и `make precommit`.
-- Проверьте, что ваш код не ломает runtime smoke-цепочку:
-  - сервис стартует;
-  - данные `user/shift/event` загружаются;
-  - `prepare` завершается, `ready` возвращает готовность;
-  - `predict` возвращает непустой список кандидатов.
-- Для проверки нагрузочного контура перед пушем можно запустить:
+Если у вас уже есть готовые файлы в `data/validation`, этот шаг можно пропустить.
+
+Если нужно сделать локальный split из `data/train/user.csv`, `data/train/shift.csv`, `data/train/event.csv`:
 
 ```bash
-make load-test
+poetry run python scripts/create_validation_split.py
 ```
 
-### Обучить baseline/свою модель
+Для быстрого smoke-прогона можно взять последние два дня:
 
 ```bash
-poetry run python -m hackaton.train.cli train \
+poetry run python scripts/create_validation_split_2d.py
+```
+
+После этого появятся:
+
+```text
+data/train/shift_train.csv
+data/train/event_train.csv
+data/validation/apply.csv
+data/validation/shift.csv
+data/validation/event.csv
+```
+
+## Запустить eval
+
+Eval сам не поднимает сервис. Перед командой ниже должен работать `make run`.
+
+Для локального split:
+
+```bash
+poetry run python -m hackaton.eval.cli run \
+  --host 127.0.0.1 \
+  --port 8000 \
   --user-path data/train/user.csv \
-  --shift-path data/train/shift.csv \
-  --event-path data/train/event.csv \
-  --output-dir artifacts/train \
-  --skip-shap
+  --shift-path data/train/shift_train.csv \
+  --event-path data/train/event_train.csv \
+  --val-apply-path data/validation/apply.csv \
+  --val-shift-path data/validation/shift.csv \
+  --val-event-path data/validation/event.csv \
+  --output-dir artifacts/eval_run \
+  --limit 10 \
+  --batch-size 1000 \
+  --predict-max-concurrency 4 \
+  --predict-max-rpm 200
 ```
 
-### Запустить eval
+Для готового train/validation набора:
 
 ```bash
 poetry run python -m hackaton.eval.cli run \
@@ -63,100 +92,139 @@ poetry run python -m hackaton.eval.cli run \
   --val-shift-path data/validation/shift.csv \
   --val-event-path data/validation/event.csv \
   --output-dir artifacts/eval_run \
+  --limit 10 \
+  --batch-size 1000 \
   --predict-max-concurrency 4 \
   --predict-max-rpm 200
 ```
 
-### Проверить отчет
+Отчет:
 
-- `artifacts/eval_run/eval_report.md`
-
-## Как добавлять новую библиотеку
-
-Используйте только `poetry`, чтобы зависимости и lock-файл оставались согласованными.
-
-Для runtime-зависимости:
-
-```bash
-poetry add <package-name>
+```text
+artifacts/eval_run/eval_report.md
 ```
 
-Для dev-зависимости:
+## Запустить time-based CV
+
+CV не требует запущенного сервиса.
 
 ```bash
-poetry add --group dev <package-name>
+poetry run python -m hackaton.train.cli cv \
+  --user-path data/train/user.csv \
+  --shift-path data/train/shift_train.csv \
+  --event-path data/train/event_train.csv \
+  --output-dir artifacts/cv_run \
+  --val-days 30 \
+  --candidate-limit 300
 ```
 
-После добавления:
+Если split не создавался, можно передать исходные train-файлы:
+
+```bash
+poetry run python -m hackaton.train.cli cv \
+  --user-path data/train/user.csv \
+  --shift-path data/train/shift.csv \
+  --event-path data/train/event.csv \
+  --output-dir artifacts/cv_run \
+  --val-days 30 \
+  --candidate-limit 300
+```
+
+Отчет:
+
+```text
+artifacts/cv_run/cv_report.md
+```
+
+## Где менять решение
+
+Основные файлы финального ML-решения:
+
+- `hackaton/service/ml_model.py` - признаки, обучение, LightGBM, скоринг, sleeper-rerank;
+- `hackaton/service/prepare_manager.py` - загрузка данных, обучение модели, построение кэшей;
+- `hackaton/service/app.py` - RPC-методы и online-логика `predict`;
+- `hackaton/service/repositories.py` - запись и чтение SQLite;
+- `hackaton/train/cv.py` - time-based CV.
+
+Файлы eval:
+
+- `hackaton/eval/evaluator.py` - дневная симуляция проверки;
+- `hackaton/eval/metric.py` - целевая метрика.
+
+## Как работает финальный predict
+
+1. Проверяет, готов ли сервис.
+2. Берет до 300 кандидатов из кэша по локации.
+3. Если кэш пуст, использует fallback через БД.
+4. Если модель обучена, считает score для кандидатов.
+5. Применяет rerank:
+   - ранее подавал заявку на эту смену;
+   - sleeper-пользователь;
+   - остальные по ML-score.
+6. Возвращает top `limit` пользователей.
+
+## Как читать eval-отчет
+
+В `eval_report.md` важны:
+
+- `overall_target_metric` - итоговая метрика;
+- `predict_latency_p50_ms`, `predict_latency_p80_ms`, `predict_latency_p95_ms` - задержка `predict`;
+- `predict_rpm` - фактическая частота запросов;
+- `prepare_duration_*` - сколько занимает подготовка;
+- дневные метрики;
+- метрики по группам `capacity`.
+
+Если итоговая метрика кажется странной, сначала проверьте число оцениваемых смен и групп. Дни с `capacity=1` могут плохо отражаться в ROC-AUC.
+
+## Частые проблемы
+
+### Сервис не отвечает
+
+Проверьте, что запущен:
+
+```bash
+make run
+```
+
+### Порт 8000 занят
+
+Остановите старый процесс. Если в ветке есть helper:
+
+```bash
+./kill_8000.sh
+```
+
+### `predict` возвращает 503
+
+Сервис еще в `prepare`. Подождите `ready` и проверьте логи.
+
+### Eval дает нули
+
+Проверьте:
+
+- правильный ли `apply.csv`;
+- совпадает ли `apply.date` с `shift.start_at.date()`;
+- правильные ли пути к `shift_train.csv` и `event_train.csv`;
+- есть ли validation-смены с `capacity >= 2`;
+- не передан ли train вместо validation или наоборот.
+
+## Перед сдачей
+
+Минимальный чек:
 
 ```bash
 make test
 make precommit
 ```
 
-Что важно:
+Желательно также:
 
-- не редактируйте `poetry.lock` вручную;
-- если меняется состав/версии библиотек, коммитите вместе и `pyproject.toml`, и `poetry.lock`.
+```bash
+make load-test
+```
 
-## Куда вносить изменения
+И отдельно убедиться, что:
 
-- `hackaton/service/app.py`
-  - online-логика `predict`;
-  - правила фильтрации/ранжирования кандидатов;
-- `hackaton/train/training.py`
-  - feature engineering;
-  - выбор/настройка модели;
-  - train-артефакты.
-
-## Что лучше не трогать
-
-- Контракты RPC-методов (`user`, `event`, `shift`, `prepare`, `ready`, `predict`).
-- Контракты входных CSV.
-- Ограничение `predict_max_rpm <= 200`.
-- Фиксированный пул: `pool_size = 10`.
-- Ограничение FPR: `max_fpr = min(1.0, capacity / 10)`.
-- Агрегация:
-  - shift -> capacity-group/day;
-  - day -> overall metric.
-
-Подробнее про регламент можно прочитать в: `REGLAMENT.md`.
-
-## Как читать eval-отчет
-
-В `eval_report.md` смотрите:
-
-- `overall_target_metric` — итоговый score решения.
-- `predict_latency_p50/p80/p95` — задержки запросов `predict`.
-- `predict_rpm` — фактический темп запросов.
-- `prepare_duration_*` — цена подготовки модели.
-- `Daily metrics` — детализация качества по дням и группам `capacity`.
-
-## Частые проблемы и что делать
-
-- `predict` возвращает `503 model is in prepare state`
-  - дождитесь `ready` ;
-  - проверьте таймауты `prepare_*_timeout_sec`.
-- Eval падает на лимите RPM
-  - уменьшите `--predict-max-concurrency`;
-  - держите `--predict-max-rpm` не выше 200.
-- Пустая/нулевая метрика
-  - проверьте, что в `apply.csv` есть валидные совпадения с `predict`;
-  - проверьте корректность `user_id/shift_id/date`.
-- Изменили версии в `pyproject.toml` вручную, и `poetry.lock` устарел
-  - перегенерируйте lock: `poetry lock`;
-  - установите зависимости из lock: `poetry install`;
-  - если нужно обновить конкретный пакет до новой версии: `poetry add <package-name>@<version>`;
-  - если lock поврежден или конфликтный, можно пересобрать полностью:
-    - `rm poetry.lock`
-    - `poetry lock`
-    - `poetry install`
-
-## Чеклист перед MR
-
-- Используйте `CHECKLIST.md` как обязательный pre-commit/pre-MR список.
-- Минимум перед отправкой:
-  - `make test` зеленый;
-  - `make precommit` зеленый;
-  - CI-цепочка из `.github/workflows/ci.yml` не должна падать на smoke-check;
-  - `eval_report.md` формируется и читается.
+- `artifacts/eval_run/eval_report.md` создается;
+- `artifacts/cv_run/cv_report.md` создается при запуске CV;
+- документация по воспроизводимости соответствует командам, которые реально запускались.

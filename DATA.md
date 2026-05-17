@@ -1,28 +1,27 @@
 # DATA: форматы train/validation данных
 
-## Назначение
+Этот документ описывает CSV-файлы, которые используются сервисом, локальным eval и validation split.
 
-Этот файл описывает входные CSV-контракты для:
+## Train-данные
 
-- начальной загрузки (`train`);
-- дневного цикла оценки (`validation`).
+Ожидаемые файлы:
 
-## Train (начальная загрузка)
-
-Файлы:
-
-- `data/train/user.csv`
-- `data/train/shift.csv`
-- `data/train/event.csv`
+```text
+data/train/user.csv
+data/train/shift.csv
+data/train/event.csv
+```
 
 ### `user.csv`
 
 Колонки:
 
-- `location_id` (string) — идентификатор локации пользователя.
-- `is_strict_location` (bool) — пользователь явно выбрал локацию.
-- `id` (string) — идентификатор пользователя.
-- `has_mk` (bool) — наличие медкнижки.
+| Колонка | Тип | Описание |
+|---|---|---|
+| `location_id` | string | идентификатор локации пользователя |
+| `is_strict_location` | bool | пользователь явно выбрал локацию |
+| `id` | string | идентификатор пользователя |
+| `has_mk` | bool | наличие медкнижки |
 
 Пример:
 
@@ -36,17 +35,19 @@ loc_2,false,u_1002,false
 
 Колонки:
 
-- `id` (string)
-- `start_at` (datetime string, ISO-8601)
-- `location_id` (string)
-- `task_type` (string)
-- `employer_id` (string)
-- `workplace_id` (string)
-- `need_mk` (bool)
-- `id_differential` (bool)
-- `hours` (int)
-- `reward` (float)
-- `capacity` (int)
+| Колонка | Тип | Описание |
+|---|---|---|
+| `id` | string | идентификатор смены |
+| `start_at` | datetime | время начала смены |
+| `location_id` | string | локация смены |
+| `task_type` | string | тип задачи |
+| `employer_id` | string | работодатель |
+| `workplace_id` | string | рабочая точка |
+| `need_mk` | bool | нужна ли медкнижка |
+| `id_differential` | bool | специальный признак ставки |
+| `hours` | int | длительность |
+| `reward` | float | оплата |
+| `capacity` | int | сколько работников нужно |
 
 Пример:
 
@@ -60,11 +61,21 @@ s_502,2026-03-24T10:00:00Z,loc_2,loader,e_12,w_90,false,false,6,1400.0,2
 
 Колонки:
 
-- `id` (uuid|string)
-- `shift_id` (string)
-- `user_id` (string)
-- `interaction` (string): `VIEW`, `APPLY`, `FINISHED`, `USER_CANCEL`, `SYSTEM_CANCEL`
-- `ts` (datetime string, ISO-8601)
+| Колонка | Тип | Описание |
+|---|---|---|
+| `id` | uuid/string | идентификатор события |
+| `shift_id` | string | идентификатор смены |
+| `user_id` | string | идентификатор пользователя |
+| `interaction` | string | тип события |
+| `ts` | datetime | время события |
+
+Допустимые `interaction`:
+
+- `VIEW`;
+- `APPLY`;
+- `FINISHED`;
+- `USER_CANCEL`;
+- `SYSTEM_CANCEL`.
 
 Пример:
 
@@ -74,21 +85,25 @@ id,shift_id,user_id,interaction,ts
 4d04eec1-3ccb-4fd8-bbd5-43e535d18ef6,s_501,u_1001,APPLY,2026-03-23T15:05:00Z
 ```
 
-## Validation (дневной цикл оценки)
+## Validation-данные
 
-Файлы:
+Ожидаемые файлы:
 
-- `data/validation/apply.csv`
-- `data/validation/shift.csv`
-- `data/validation/event.csv`
+```text
+data/validation/apply.csv
+data/validation/shift.csv
+data/validation/event.csv
+```
 
-### `apply.csv`
+### `validation/apply.csv`
 
 Колонки:
 
-- `user_id` (string)
-- `shift_id` (string)
-- `date` (date, `YYYY-MM-DD`)
+| Колонка | Тип | Описание |
+|---|---|---|
+| `user_id` | string | пользователь, который реально подал заявку |
+| `shift_id` | string | смена, на которую подана заявка |
+| `date` | date | дата начала смены |
 
 Пример:
 
@@ -98,29 +113,63 @@ u_1001,s_601,2026-03-25
 u_1002,s_602,2026-03-25
 ```
 
+Важно: `date` - это дата начала смены `shift.start_at.date()`, а не дата события `APPLY`. Пользователь может откликнуться заранее, но eval группирует проверки по дате смены.
+
+Также в ground truth не должны попадать `APPLY`, которые произошли после `shift.start_at`.
+
 ### `validation/shift.csv`
 
 Схема такая же, как у `train/shift.csv`.
-
-Пример:
-
-```csv
-id,start_at,location_id,task_type,employer_id,workplace_id,need_mk,id_differential,hours,reward,capacity
-s_601,2026-03-25T09:00:00Z,loc_1,picker,e_10,w_77,true,false,8,1900.0,3
-```
 
 ### `validation/event.csv`
 
 Схема такая же, как у `train/event.csv`.
 
-Пример:
+## Файлы после локального split
 
-```csv
-id,shift_id,user_id,interaction,ts
-f9d02b6f-5ce7-4574-80e3-366f6c1b4efa,s_601,u_1001,VIEW,2026-03-25T11:00:00Z
+Если validation создается локально через:
+
+```bash
+poetry run python scripts/create_validation_split.py
 ```
 
-## Важные замечания
+или:
 
-- Полный регламент расчета метрики и дневного цикла: `REGLAMENT.md`.
-- Практический маршрут участника: `HOW-TO.md`.
+```bash
+poetry run python scripts/create_validation_split_2d.py
+```
+
+то дополнительно создаются:
+
+```text
+data/train/shift_train.csv
+data/train/event_train.csv
+data/validation/apply.csv
+data/validation/shift.csv
+data/validation/event.csv
+data/validation/users.csv
+```
+
+В этом сценарии для eval нужно передавать:
+
+- `data/train/user.csv`;
+- `data/train/shift_train.csv`;
+- `data/train/event_train.csv`;
+- validation-файлы из `data/validation`.
+
+## Проверки корректности данных
+
+Перед eval полезно проверить:
+
+- все обязательные колонки есть;
+- `apply.shift_id` пересекается с `validation/shift.id`;
+- `apply.date` совпадает с `validation/shift.start_at.date()`;
+- в `apply.csv` нет заявок после начала смены;
+- train-события не содержат будущей информации после split-даты;
+- даты успешно парсятся как timezone-aware datetime.
+
+## Где читать дальше
+
+- `REGLAMENT.md` - как считается метрика.
+- `docs/REPRODUCIBILITY.md` - как подготовить данные и запустить eval.
+- `docs/METRICS_AND_EXPERIMENTS.md` - почему split и `capacity` сильно влияют на результат.
