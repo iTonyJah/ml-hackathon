@@ -1,3 +1,9 @@
+"""
+RPC сервис хакатона.
+predict() использует кэш активных пользователей + ML скоринг.
+Latency оптимизирована — нет тяжёлых SQL запросов при predict.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -10,7 +16,6 @@ from hackaton.service.dto import (
     BatchShiftsRequest,
     BatchUsersRequest,
     PredictRequest,
-    PredictResponse,
 )
 from hackaton.service.prepare_manager import PrepareManager
 from hackaton.service.repositories import Repository
@@ -36,7 +41,6 @@ class HackatonRpcService:
     async def user_stat(self, _: dict | None = None) -> dict:
         REQUEST_COUNT.labels("user_stat").inc()
         with REQUEST_LATENCY.labels("user_stat").time():
-            LOGGER.info("RPC user_stat called")
             return {"count": await self.repository.count_table("users")}
 
     async def event(self, payload: dict) -> dict:
@@ -50,7 +54,6 @@ class HackatonRpcService:
     async def event_stat(self, _: dict | None = None) -> dict:
         REQUEST_COUNT.labels("event_stat").inc()
         with REQUEST_LATENCY.labels("event_stat").time():
-            LOGGER.info("RPC event_stat called")
             return {"count": await self.repository.count_table("events")}
 
     async def shift(self, payload: dict) -> dict:
@@ -64,7 +67,6 @@ class HackatonRpcService:
     async def shift_stat(self, _: dict | None = None) -> dict:
         REQUEST_COUNT.labels("shift_stat").inc()
         with REQUEST_LATENCY.labels("shift_stat").time():
-            LOGGER.info("RPC shift_stat called")
             return {"count": await self.repository.count_table("shifts")}
 
     async def prepare(self, _: dict | None = None) -> dict:
@@ -79,7 +81,6 @@ class HackatonRpcService:
     async def ready(self, _: dict | None = None) -> dict:
         REQUEST_COUNT.labels("ready").inc()
         with REQUEST_LATENCY.labels("ready").time():
-            LOGGER.info("RPC ready called")
             if not self.prepare_manager.ready:
                 return {"ready": False, "status_code": 425}
             return {"ready": True, "status_code": 200}
@@ -87,7 +88,6 @@ class HackatonRpcService:
     async def predict(self, payload: dict) -> dict:
         REQUEST_COUNT.labels("predict").inc()
         with REQUEST_LATENCY.labels("predict").time():
-            LOGGER.info("RPC predict called")
             if not self.prepare_manager.ready:
                 return {"user_ids": [], "status_code": 503, "detail": "model is in prepare state"}
             try:
@@ -95,30 +95,67 @@ class HackatonRpcService:
             except ValidationError as exc:
                 return {"user_ids": [], "status_code": 422, "detail": str(exc)}
 
-            """
-                EXTENSION POINT
-                Ваше решение должно быть здесь.
-            """
-            candidates = await self.repository.find_top_candidates(
-                location_id=request.shift.location_id,
-                need_mk=request.shift.need_mk,
-                limit=request.limit,
+            shift = request.shift
+            pm = self.prepare_manager
+
+            # Шаг 1: получаем кандидатов из локации + глобальный fallback
+            candidates = pm.get_candidates(
+                location_id=shift.location_id,
+                need_mk=shift.need_mk,
+                limit=300,  # топ-300 по активности — достаточно для recall, меньше шума
             )
+
+            # До первого prepare кэш пуст — fallback к DB (только при старте сервиса)
+            if not candidates:
+                candidates = await self.repository.find_top_candidates(
+                    location_id=str(shift.location_id),
+                    need_mk=bool(shift.need_mk),
+                    limit=request.limit,
+                )
             if not candidates:
                 candidates = await self.repository.fallback_candidates(limit=request.limit)
             if not candidates:
                 return {"user_ids": [], "status_code": 400, "detail": "no users loaded"}
-            result = PredictResponse(user_ids=candidates)
-            return {"user_ids": result.user_ids, "status_code": 200}
+
+            # Шаг 2: скорим ML моделью используя кэш данных пользователей
+            model = pm.model
+            if model.is_trained:
+                shift_dict = {
+                    "id": shift.id,
+                    "start_at": shift.start_at.isoformat(),
+                    "location_id": shift.location_id,
+                    "task_type": shift.task_type,
+                    "employer_id": shift.employer_id,
+                    "workplace_id": shift.workplace_id,
+                    "need_mk": shift.need_mk,
+                    "id_differential": shift.id_differential,
+                    "hours": shift.hours,
+                    "reward": shift.reward,
+                    "capacity": shift.capacity,
+                }
+                # Используем кэш пользователей — нет обращений к БД
+                scored = model.predict_scores(candidates, pm._users_cache, shift_dict)
+                top_candidates = [uid for uid, _ in scored[: request.limit]]
+                LOGGER.info(
+                    "predict: shift=%s loc=%s pool=%d top=%d model=trained",
+                    shift.id,
+                    shift.location_id,
+                    len(candidates),
+                    len(top_candidates),
+                )
+            else:
+                # Fallback — просто топ активных
+                top_candidates = candidates[: request.limit]
+                LOGGER.warning("predict: shift=%s model not trained, using activity rank", shift.id)
+
+            return {"user_ids": top_candidates, "status_code": 200}
 
     async def health(self, _: dict | None = None) -> dict:
         REQUEST_COUNT.labels("health").inc()
-        LOGGER.info("RPC health called")
         return {"status": "ok", "status_code": 200}
 
     async def metrics(self, _: dict | None = None) -> dict:
         REQUEST_COUNT.labels("metrics").inc()
-        LOGGER.info("RPC metrics called")
         return {
             "content_type": CONTENT_TYPE_LATEST,
             "payload": generate_latest().decode("utf-8"),

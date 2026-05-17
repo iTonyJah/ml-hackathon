@@ -224,3 +224,6 @@ data/
 settings.json
 implementation/
 tmp_eval_sample/
+/.agents/
+/.claude/
+/.github/

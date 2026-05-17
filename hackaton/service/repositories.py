@@ -1,3 +1,8 @@
+"""
+Repository — работа с SQLite базой данных.
+Кандидаты для predict отбираются по активности (количеству событий).
+"""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -87,7 +92,7 @@ class Repository:
     async def count_table(self, table_name: str) -> int:
         if table_name not in {"users", "events", "shifts"}:
             raise ValueError(f"unsupported table: {table_name}")
-        query = f"SELECT COUNT(1) FROM {table_name}"  # nosec - table is validated above
+        query = f"SELECT COUNT(1) FROM {table_name}"  # nosec
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(query)
             row = await cursor.fetchone()
@@ -99,12 +104,19 @@ class Repository:
         need_mk: bool,
         limit: int,
     ) -> list[str]:
+        """
+        Получаем кандидатов по локации и мед книжке.
+        Сортируем по количеству событий — активные пользователи важнее.
+        Активные пользователи с историей гораздо вероятнее выйдут на смену.
+        """
         query = """
-        SELECT id
-        FROM users
-        WHERE location_id = ?
-          AND (? = 0 OR has_mk = 1)
-        ORDER BY is_strict_location DESC, has_mk DESC, id ASC
+        SELECT u.id, COUNT(e.id) as n_events
+        FROM users u
+        LEFT JOIN events e ON e.user_id = u.id
+        WHERE u.location_id = ?
+          AND (? = 0 OR u.has_mk = 1)
+        GROUP BY u.id
+        ORDER BY n_events DESC
         LIMIT ?
         """
         async with aiosqlite.connect(self.db_path) as db:
@@ -113,8 +125,41 @@ class Repository:
         return [row[0] for row in rows]
 
     async def fallback_candidates(self, limit: int) -> list[str]:
-        query = "SELECT id FROM users ORDER BY id ASC LIMIT ?"
+        """
+        Fallback — активные пользователи без фильтрации по локации.
+        Используется когда в локации мало кандидатов.
+        """
+        query = """
+        SELECT u.id, COUNT(e.id) as n_events
+        FROM users u
+        LEFT JOIN events e ON e.user_id = u.id
+        GROUP BY u.id
+        ORDER BY n_events DESC
+        LIMIT ?
+        """
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(query, (limit,))
             rows = await cursor.fetchall()
         return [row[0] for row in rows]
+
+    async def get_users_by_ids(self, user_ids: list[str]) -> dict[str, dict]:
+        """Получаем данные пользователей по списку id для feature engineering"""
+        if not user_ids:
+            return {}
+        placeholders = ",".join("?" * len(user_ids))
+        query = f"""
+        SELECT id, location_id, is_strict_location, has_mk
+        FROM users WHERE id IN ({placeholders})
+        """  # nosec
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(query, user_ids)
+            rows = await cursor.fetchall()
+        return {
+            row[0]: {
+                "id": row[0],
+                "location_id": row[1],
+                "is_strict_location": bool(row[2]),
+                "has_mk": bool(row[3]),
+            }
+            for row in rows
+        }
