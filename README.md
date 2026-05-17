@@ -280,7 +280,7 @@ max_fpr = min(1.0, capacity / 10)
 
 ### Распределение ролей в команде:
 * **Антон Лысогор** — Team Lead, координация проекта и подготовка презентации | [@iTonyJah](https://github.com/iTonyJah)
-* **Денис Богомолов** — Lead Data Scientist / Solution Architect (архитектура ML-ядра) | [@goddenis](https://github.com/goddenis)
+* **Денис Богомолов** — Главный разработчик, создание ML-модели | [@goddenis](https://github.com/goddenis)
 * **Дмитрий Прокопенко** — Data Analyst, исследование данных и валидация моделей | [@DmitriyProkopenko](https://github.com/DmitriyProkopenko)
 * **Андрей Лаптинский** — ML Engineer, подбор архитектур и сравнительный анализ моделей | [@denami](https://github.com/denami)
 * **Юрий Спиридонов** — DevOps / QA Engineer, тестирование интеграции и стабильности | [@YuriSpiridonov](https://github.com/YuriSpiridonov)
