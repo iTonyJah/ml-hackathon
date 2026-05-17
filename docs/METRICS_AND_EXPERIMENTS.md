@@ -8,9 +8,9 @@
 
 Используется ROC-AUC с ограничением FPR:
 
-```text
-max_fpr = min(1.0, capacity / 10)
-```
+$$
+\text{max\_fpr} = \min\left(1.0,\frac{\text{capacity}}{10}\right)
+$$
 
 Агрегация:
 
