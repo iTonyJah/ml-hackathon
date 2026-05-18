@@ -8,7 +8,7 @@ git switch release/sleeper-rerank
 # Установка зависимостей
 make install
 
-# Копируем полученные файлы в data/train
+# Копируем полученные файлы от заказчика в data/train
 
 # Создание валидационного сплита
 # (обязательно перед eval для участника так data/validation у нас нет)
