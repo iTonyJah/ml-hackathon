@@ -19,12 +19,6 @@ DATA_DIR = BASE_DIR / "data"
 TRAIN_DIR = DATA_DIR / "train"
 VAL_DIR = DATA_DIR / "validation"
 
-
-print(f"\nДата разбиения: {BASE_DIR}")
-print(f"\nДата разбиения: {DATA_DIR}")
-print(f"\nДата разбиения: {TRAIN_DIR}")
-print(f"\nДата разбиения: {VAL_DIR}")
-
 # Финальная оценка — на последних 1-2 неделях.
 # Новые данные заканчиваются ~2026-03-22, берём последние 2 дня как val, для быстроты
 SPLIT_DATE = pd.Timestamp("2026-03-20", tz="UTC")
